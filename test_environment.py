@@ -14,6 +14,10 @@ from environment import Environment, Renderer
 from shooting import fire_beam
 
 
+def heading(agent: Agent) -> float:
+    return math.degrees(math.atan2(agent.aim_y, agent.aim_x)) % 360
+
+
 class EnvironmentTests(unittest.TestCase):
     def setUp(self):
         self.env = Environment()
@@ -23,16 +27,16 @@ class EnvironmentTests(unittest.TestCase):
     def test_environment_does_not_create_human_players(self):
         self.assertEqual(Environment().entities, [])
         with patch.object(Player, "player_action") as read_input:
-            self.env.step([Action(0, 0, 0, False)])
+            self.env.step([Action(0, 0, 1, 0, False)])
         read_input.assert_not_called()
 
     def test_movement_is_normalized_and_body_stays_in_bounds(self):
-        self.env.step([Action(1, 1, 450, False)], dt=0.1)
+        self.env.step([Action(1, 1, 0, 1, False)], dt=0.1)
         self.assertAlmostEqual(
             self.agent.position.distance_to(Vector2(100, 100)), 20
         )
-        self.assertAlmostEqual(self.agent.aim_degree, 90 * -math.expm1(-1))
-        self.env.step([Action(1, -1, 0, False)], dt=10)
+        self.assertAlmostEqual(heading(self.agent), 90 * -math.expm1(-1))
+        self.env.step([Action(1, -1, 1, 0, False)], dt=10)
         self.assertEqual(self.agent.position, Vector2(790, 10))
         self.assertEqual(self.env.step_count, 2)
 
@@ -41,7 +45,7 @@ class EnvironmentTests(unittest.TestCase):
         near = Entity(Vector2(200, 100))
         self.env.entities.extend([far, near])
         with patch.object(self.env, "on_hit", wraps=self.env.on_hit) as on_hit:
-            self.env.step([Action(0, 0, 0, True)], dt=0)
+            self.env.step([Action(0, 0, 1, 0, True)], dt=0)
         self.assertEqual(on_hit.call_count, 2)
         on_hit.assert_any_call(self.agent, near)
         on_hit.assert_any_call(self.agent, far)
@@ -54,7 +58,7 @@ class EnvironmentTests(unittest.TestCase):
         target = Entity(Vector2(200, 100))
         self.env.entities.append(target)
         with patch.object(self.env, "on_hit") as on_hit:
-            self.env.step([Action(0, 0, 0, True)], dt=0)
+            self.env.step([Action(0, 0, 1, 0, True)], dt=0)
         on_hit.assert_called_once_with(self.agent, target)
         self.assertIn(target, self.env.entities)
 
@@ -65,20 +69,20 @@ class EnvironmentTests(unittest.TestCase):
             Entity(Vector2(900, 100)),
         ]
         self.env.entities.extend(targets)
-        self.env.step([Action(0, 0, 0, True)], dt=0)
+        self.env.step([Action(0, 0, 1, 0, True)], dt=0)
         self.assertEqual(self.agent.shot_end, Vector2(800, 100))
         self.assertTrue(all(target in self.env.entities for target in targets))
 
     def test_ray_can_hit_edge_of_circle_and_downward_target(self):
         tangent = Entity(Vector2(200, 110))
         self.env.entities.append(tangent)
-        self.env.step([Action(0, 0, 0, True)], dt=0)
+        self.env.step([Action(0, 0, 1, 0, True)], dt=0)
         self.assertNotIn(tangent, self.env.entities)
         self.assertEqual(self.agent.shot_end, Vector2(800, 100))
         target = Entity(Vector2(100, 200))
         self.env.entities.append(target)
-        self.agent.aim_degree = 90
-        self.env.step([Action(0, 0, 90, True)], dt=self.env.fire_interval)
+        self.agent.aim_x, self.agent.aim_y = 0, 1
+        self.env.step([Action(0, 0, 0, 1, True)], dt=self.env.fire_interval)
         self.assertNotIn(target, self.env.entities)
         self.assertAlmostEqual(self.agent.shot_end.y, 600)
 
@@ -86,11 +90,11 @@ class EnvironmentTests(unittest.TestCase):
         target = Entity(Vector2(200, 100))
         self.env.entities.append(target)
         with patch.object(self.env, "on_hit") as on_hit:
-            self.env.step([Action(0, 0, 0, True)], dt=0)
-            self.env.step([Action(0, 0, 0, True)], dt=0.1)
+            self.env.step([Action(0, 0, 1, 0, True)], dt=0)
+            self.env.step([Action(0, 0, 1, 0, True)], dt=0.1)
             self.assertEqual(on_hit.call_count, 1)
             self.assertEqual(self.agent.beam_remaining, 0)
-            self.env.step([Action(0, 0, 0, True)], dt=0.1)
+            self.env.step([Action(0, 0, 1, 0, True)], dt=0.1)
             self.assertEqual(on_hit.call_count, 2)
 
 
@@ -98,18 +102,19 @@ class EnvironmentTests(unittest.TestCase):
         target = Agent(Vector2(200, 100))
         self.env.entities.append(target)
         self.env.step([
-            Action(0, 0, 0, True),
-            Action(0, 0, 180, True),
+            Action(0, 0, 1, 0, True),
+            Action(0, 0, -1, 0, True),
         ], dt=0)
         self.assertEqual(self.env.entities, [self.agent])
 
     def test_invalid_inputs_fail_before_changing_state(self):
         cases = [
             ([], 0),
-            ([Action(2, 0, 0, False)], 0),
-            ([Action(0, 0, float("nan"), False)], 0),
-            ([Action(0, 0, 0, False)], -1),
-            ([Action(0, 0, 0, False)], float("inf")),
+            ([Action(2, 0, 1, 0, False)], 0),
+            ([Action(0, 0, float("nan"), 0, False)], 0),
+            ([Action(0, 0, 1, float("inf"), False)], 0),
+            ([Action(0, 0, 1, 0, False)], -1),
+            ([Action(0, 0, 1, 0, False)], float("inf")),
         ]
         for actions, dt in cases:
             with self.subTest(actions=actions, dt=dt):
@@ -119,7 +124,7 @@ class EnvironmentTests(unittest.TestCase):
                 self.assertEqual(self.env.step_count, 0)
 
     def test_reset_clears_shooting_state(self):
-        self.env.step([Action(0, 0, 0, True)])
+        self.env.step([Action(0, 0, 1, 0, True)])
         self.env.reset()
         self.assertEqual(self.agent.shoot_cooldown, 0)
         self.assertEqual(self.agent.beam_remaining, 0)
@@ -133,8 +138,9 @@ class AimTests(unittest.TestCase):
                 env = Environment()
                 agent = entity_type(Vector2(100, 100))
                 env.entities.append(agent)
-                env.step([Action(0, 0, 250, False)])
-                turn = (agent.aim_degree + 180) % 360 - 180
+                direction = Vector2(1, 0).rotate(250)
+                env.step([Action(0, 0, direction.x, direction.y, False)])
+                turn = (heading(agent) + 180) % 360 - 180
                 self.assertGreater(turn, -110)
                 self.assertLess(turn, 0)
                 self.assertAlmostEqual(turn, -110 * -math.expm1(-10 / 60))
@@ -143,9 +149,10 @@ class AimTests(unittest.TestCase):
         for start, target in ((359, 1), (1, 359)):
             with self.subTest(start=start, target=target):
                 agent = Agent(Vector2())
-                agent.aim_degree = start
-                agent.update_aim(target, 0.1)
-                turn = (agent.aim_degree - start + 180) % 360 - 180
+                agent.aim_x, agent.aim_y = Vector2(1, 0).rotate(start)
+                direction = Vector2(1, 0).rotate(target)
+                agent.update_aim(direction.x, direction.y, 0.1)
+                turn = (heading(agent) - start + 180) % 360 - 180
                 expected = (target - start + 180) % 360 - 180
                 self.assertAlmostEqual(turn, expected * -math.expm1(-1))
 
@@ -153,32 +160,61 @@ class AimTests(unittest.TestCase):
         results = []
         for fps in (30, 60, 120):
             agent = Agent(Vector2())
+            direction = Vector2(1, 0).rotate(250)
             for _ in range(fps):
-                agent.update_aim(250, 1 / fps)
-            results.append(agent.aim_degree)
+                agent.update_aim(direction.x, direction.y, 1 / fps)
+            results.append(heading(agent))
         self.assertAlmostEqual(results[0], results[1])
         self.assertAlmostEqual(results[1], results[2])
 
     def test_zero_time_and_large_time_do_not_overshoot(self):
         agent = Agent(Vector2())
-        agent.update_aim(90, 0)
-        self.assertEqual(agent.aim_degree, 0)
+        agent.update_aim(0, 1, 0)
+        self.assertEqual(heading(agent), 0)
         for _ in range(3):
-            previous = agent.aim_degree
-            agent.update_aim(90, 0.1)
-            self.assertGreater(agent.aim_degree, previous)
-            self.assertLess(agent.aim_degree, 90)
-        self.assertGreaterEqual(agent.aim_degree, 90 * 0.95)
-        agent.update_aim(90, 100)
-        self.assertAlmostEqual(agent.aim_degree, 90)
+            previous = heading(agent)
+            agent.update_aim(0, 1, 0.1)
+            self.assertGreater(heading(agent), previous)
+            self.assertLess(heading(agent), 90)
+        self.assertGreaterEqual(heading(agent), 90 * 0.95)
+        agent.update_aim(0, 1, 100)
+        self.assertAlmostEqual(heading(agent), 90)
 
-    def test_target_angles_are_normalized(self):
-        positive = Agent(Vector2())
-        negative = Agent(Vector2())
-        positive.update_aim(450, 0.1)
-        negative.update_aim(-270, 0.1)
-        self.assertAlmostEqual(positive.aim_degree, negative.aim_degree)
-        self.assertTrue(0 <= positive.aim_degree < 360)
+    def test_target_magnitude_does_not_change_turn_or_unit_heading(self):
+        for scale in (0.001, 1, 1000):
+            with self.subTest(scale=scale):
+                agent = Agent(Vector2())
+                agent.update_aim(scale, scale, 0.1)
+                self.assertAlmostEqual(heading(agent), 45 * -math.expm1(-1))
+                self.assertAlmostEqual(math.hypot(agent.aim_x, agent.aim_y), 1)
+
+    def test_zero_vector_keeps_heading_and_can_fire(self):
+        env = Environment()
+        agent = Agent(Vector2(100, 100))
+        agent.aim_x, agent.aim_y = 0, 1
+        target = Entity(Vector2(100, 200))
+        env.entities.extend([agent, target])
+        env.step([Action(0, 0, 0, 0, True)], dt=0.1)
+        self.assertEqual((agent.aim_x, agent.aim_y), (0, 1))
+        self.assertNotIn(target, env.entities)
+
+    def test_invalid_second_action_does_not_update_first_agent(self):
+        env = Environment()
+        first = Agent(Vector2(100, 100))
+        second = Agent(Vector2(200, 100))
+        env.entities.extend([first, second])
+        for component in (float("nan"), float("inf"), -float("inf")):
+            for aim_x, aim_y in ((component, 1), (1, component)):
+                with self.subTest(aim_x=aim_x, aim_y=aim_y):
+                    with self.assertRaises(ValueError):
+                        env.step([
+                            Action(1, 0, 0, 1, True),
+                            Action(0, 0, aim_x, aim_y, False),
+                        ])
+                    self.assertEqual(first.position, Vector2(100, 100))
+                    self.assertEqual((first.aim_x, first.aim_y), (1, 0))
+                    self.assertEqual(first.shoot_cooldown, 0)
+                    self.assertEqual(env.step_count, 0)
 
     def test_shot_follows_current_heading_not_requested_heading(self):
         env = Environment()
@@ -189,12 +225,12 @@ class AimTests(unittest.TestCase):
         )
         requested_target = Entity(Vector2(100, 200))
         env.entities.extend([agent, current_target, requested_target])
-        env.step([Action(0, 0, 90, True)], dt=0.01)
+        env.step([Action(0, 0, 0, 1, True)], dt=0.01)
         self.assertNotIn(current_target, env.entities)
         self.assertIn(requested_target, env.entities)
         direction = agent.shot_end - agent.shot_start
         self.assertAlmostEqual(
-            math.degrees(math.atan2(direction.y, direction.x)), agent.aim_degree
+            math.degrees(math.atan2(direction.y, direction.x)), heading(agent)
         )
 
 
@@ -275,18 +311,21 @@ class PlayerTests(unittest.TestCase):
             patch.object(pygame.mouse, "get_pressed", return_value=(True, False, False)),
         ):
             action = player.player_action()
-        self.assertEqual(action, Action(1, -1, 90, True))
+        self.assertEqual(action, Action(1, -1, 0, 1, True))
         self.assertEqual(player.position, Vector2(100, 100))
 
     def test_mouse_at_player_keeps_previous_aim(self):
         player = Player(Vector2(100, 100))
-        player.aim_degree = 45
+        player.aim_x, player.aim_y = Vector2(1, 0).rotate(45)
         with (
             patch.object(pygame.key, "get_pressed", return_value=defaultdict(bool)),
             patch.object(pygame.mouse, "get_pos", return_value=(100, 100)),
             patch.object(pygame.mouse, "get_pressed", return_value=(False, False, False)),
         ):
-            self.assertEqual(player.player_action(), Action(0, 0, 45, False))
+            self.assertEqual(
+                player.player_action(),
+                Action(0, 0, player.aim_x, player.aim_y, False),
+            )
 
 
 class RendererTests(unittest.TestCase):
@@ -326,12 +365,12 @@ class RendererTests(unittest.TestCase):
             renderer = Renderer()
         try:
             player = Player(Vector2(100, 100))
-            player.aim_degree = 90
+            player.aim_x, player.aim_y = 0, 1
             agent = Agent(Vector2(300, 100))
             renderer.entities.extend([player, agent])
             renderer.step([
-                Action(0, 0, 90, True),
-                Action(0, 0, 0, False),
+                Action(0, 0, 0, 1, True),
+                Action(0, 0, 1, 0, False),
             ], dt=0)
             self.assertTrue(renderer.render())
             screen = renderer.screen
