@@ -61,6 +61,7 @@ python train.py evaluate --model models\experiment1.zip --episodes 1000 --eval-s
 python train.py evaluate --episodes 100 --sampling-seed 7 --output models\diagnostics.json
 python train.py watch --model models\experiment1.zip --episodes 5
 python train.py watch --model models\experiment1-shaped-500k.zip --episodes 10 --stochastic --sampling-seed 0
+python scripted_bot.py --episodes 10 --eval-seed 10000
 python -m unittest test_environment test_aim_env -q
 ```
 
@@ -75,6 +76,12 @@ both seeds with the same model and software reproduces stochastic playback.
 Changing the sampling seed has no effect on deterministic actions. Playback
 never trains or saves the model and preserves the caller's Torch CPU RNG state.
 The original human-controlled demo remains available via `python main.py`.
+
+The scripted aimer lives in [scripted_bot.py](scripted_bot.py). Run it directly
+to watch the scripted baseline without loading or training a PPO model.
+`--episodes` defaults to 5 and `--eval-seed` defaults to 10000, matching PPO
+playback's scenario seeds. Close the Pygame window to stop early.
+Evaluation imports the same scripted policy from this module.
 
 Evaluation compares deterministic PPO (`ppo`), sampled PPO (`ppo_stochastic`),
 a random policy, and a scripted aimer on

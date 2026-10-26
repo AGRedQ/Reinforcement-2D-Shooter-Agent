@@ -16,7 +16,8 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.env_checker import check_env
 
 from aim_env import AimEnv
-from train import evaluate, evaluate_policy, main, scripted_action
+from scripted_bot import main as scripted_main, scripted_action
+from train import evaluate, evaluate_policy, main
 
 
 class AimEnvTests(unittest.TestCase):
@@ -309,6 +310,73 @@ class AimEnvTests(unittest.TestCase):
         finally:
             env.close()
         self.assertFalse(pygame.display.get_init())
+
+
+class ScriptedBotTests(unittest.TestCase):
+    def test_playback_uses_scripted_actions_and_seeded_scenarios(self):
+        with patch.dict(os.environ, {"SDL_VIDEODRIVER": "dummy"}):
+            env = AimEnv(render_mode="human")
+        self.addCleanup(env.close)
+        with (
+            patch.object(sys, "argv", [
+                "scripted_bot.py", "--episodes", "2", "--eval-seed", "20000",
+            ]),
+            patch("scripted_bot.AimEnv", return_value=env),
+            patch("scripted_bot.scripted_action", wraps=scripted_action) as action,
+            patch.object(env, "reset", wraps=env.reset) as reset,
+        ):
+            scripted_main()
+        self.assertTrue(action.called)
+        self.assertEqual([call.kwargs["seed"] for call in reset.call_args_list], [20000, 20001])
+        self.assertEqual(env.shots, 1)
+        self.assertNotIn(env.target, env.simulation.entities)
+        self.assertFalse(pygame.display.get_init())
+
+    def test_playback_stops_before_acting_when_window_closes(self):
+        with patch.dict(os.environ, {"SDL_VIDEODRIVER": "dummy"}):
+            env = AimEnv(render_mode="human")
+        self.addCleanup(env.close)
+        render = env.render
+
+        def close_window():
+            pygame.event.post(pygame.event.Event(pygame.QUIT))
+            render()
+
+        with (
+            patch.object(sys, "argv", ["scripted_bot.py"]),
+            patch("scripted_bot.AimEnv", return_value=env),
+            patch.object(env, "render", side_effect=close_window),
+            patch("scripted_bot.scripted_action") as action,
+        ):
+            scripted_main()
+        action.assert_not_called()
+        self.assertFalse(pygame.display.get_init())
+
+    def test_playback_closes_and_propagates_policy_errors(self):
+        with patch.dict(os.environ, {"SDL_VIDEODRIVER": "dummy"}):
+            env = AimEnv(render_mode="human")
+        self.addCleanup(env.close)
+        with (
+            patch.object(sys, "argv", ["scripted_bot.py"]),
+            patch("scripted_bot.AimEnv", return_value=env),
+            patch("scripted_bot.scripted_action", side_effect=ValueError("policy failed")),
+        ):
+            with self.assertRaisesRegex(ValueError, "policy failed"):
+                scripted_main()
+        self.assertFalse(pygame.display.get_init())
+
+    def test_invalid_arguments_are_rejected_before_creating_window(self):
+        for arguments in (["--episodes", "0"], ["--episodes", "-1"], ["--eval-seed", "-1"]):
+            with (
+                self.subTest(arguments=arguments),
+                patch.object(sys, "argv", ["scripted_bot.py", *arguments]),
+                patch("scripted_bot.AimEnv") as create_env,
+                patch("sys.stderr"),
+            ):
+                with self.assertRaises(SystemExit) as error:
+                    scripted_main()
+                self.assertEqual(error.exception.code, 2)
+                create_env.assert_not_called()
 
 
 class WatchTests(unittest.TestCase):

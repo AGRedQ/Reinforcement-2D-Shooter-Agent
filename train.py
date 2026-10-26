@@ -2,7 +2,6 @@
 
 import argparse
 import json
-import math
 from collections.abc import Callable
 from pathlib import Path
 
@@ -14,27 +13,10 @@ from stable_baselines3.common.monitor import Monitor
 
 from aim_env import AimEnv
 from environment import Renderer
+from scripted_bot import scripted_action
 
 
 Policy = Callable[[np.ndarray], np.ndarray]
-
-
-def scripted_action(observation: np.ndarray) -> np.ndarray:
-    """Aim directly at the target and only fire when the beam is aligned."""
-    offset = observation[:2].astype(np.float64)
-    distance = float(np.linalg.norm(offset))
-    direction = offset / distance
-    aim = observation[2:4]
-    error = abs(math.atan2(
-        aim[0] * direction[1] - aim[1] * direction[0],
-        float(np.dot(aim, direction)),
-    ))
-    # Offsets use the 800x600 world's diagonal; target radius is 10 pixels.
-    tolerance = math.asin(min(1.0, 10 / (distance * 1000)))
-    return np.array(
-        [direction[0], direction[1], 1 if error <= tolerance else -1],
-        dtype=np.float32,
-    )
 
 
 def evaluate_policy(
