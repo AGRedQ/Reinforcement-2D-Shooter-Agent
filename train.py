@@ -12,7 +12,7 @@ from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.monitor import Monitor
 
 from aim_env import AimEnv
-from environment import Renderer
+from renderer import Renderer
 from scripted_bot import scripted_action
 
 

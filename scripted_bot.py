@@ -6,7 +6,7 @@ import math
 import numpy as np
 
 from aim_env import AimEnv
-from environment import Renderer
+from renderer import Renderer
 
 
 def scripted_action(observation: np.ndarray) -> np.ndarray:

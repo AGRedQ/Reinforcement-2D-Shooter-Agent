@@ -9,13 +9,111 @@ from unittest.mock import patch
 import pygame
 from pygame import Vector2
 
-from entities import Action, Agent, Entity, Player
-from environment import Environment, Renderer
-from shooting import fire_beam
+from entities import Action, Agent, Entity, Player, Wall, fire_beam
+from environment import Environment
+from renderer import Renderer
 
 
 def heading(agent: Agent) -> float:
     return math.degrees(math.atan2(agent.aim_y, agent.aim_x)) % 360
+
+
+class WallCollisionTests(unittest.TestCase):
+    def setUp(self):
+        self.env = Environment()
+        self.agent = Agent(Vector2(100, 100))
+        self.env.entities.append(self.agent)
+
+    def test_large_step_stops_at_radius_and_can_move_away(self):
+        self.env.walls.append(Wall(Vector2(200, 0), Vector2(200, 600)))
+        self.env.step([Action(1, 0, 1, 0, False)], dt=2)
+        self.assertAlmostEqual(self.agent.position.x, 190)
+        self.env.step([Action(-1, 0, 1, 0, False)], dt=0.1)
+        self.assertAlmostEqual(self.agent.position.x, 170)
+
+    def test_diagonal_movement_slides_along_wall(self):
+        self.env.walls.append(Wall(Vector2(200, 0), Vector2(200, 600)))
+        self.env.step([Action(1, 1, 1, 0, False)], dt=1)
+        self.assertAlmostEqual(self.agent.position.x, 190)
+        self.assertAlmostEqual(self.agent.position.y, 100 + 200 / math.sqrt(2))
+        self.env.step([Action(0, 1, 1, 0, False)], dt=0.1)
+        self.assertAlmostEqual(self.agent.position.x, 190)
+        self.assertAlmostEqual(self.agent.position.y, 120 + 200 / math.sqrt(2))
+
+    def test_diagonal_wall_and_corner(self):
+        self.env.walls.append(Wall(Vector2(0, 200), Vector2(400, 600)))
+        self.env.step([Action(0, 1, 1, 0, False)], dt=1.5)
+        wall = self.env.walls[0]
+        distance = abs((self.agent.position - wall.start).cross(wall.end - wall.start))
+        distance /= (wall.end - wall.start).length()
+        self.assertAlmostEqual(distance, self.agent.radius)
+        self.env.walls = [
+            Wall(Vector2(200, 0), Vector2(200, 600)),
+            Wall(Vector2(0, 200), Vector2(800, 200)),
+        ]
+        self.agent.position = Vector2(100, 100)
+        self.env.step([Action(1, 1, 1, 0, False)], dt=2)
+        self.assertAlmostEqual(self.agent.position.x, 190)
+        self.assertAlmostEqual(self.agent.position.y, 190)
+
+    def test_wall_endpoint_blocks_swept_body_and_point_wall(self):
+        for end in (Vector2(200, 200), Vector2(200, 100)):
+            with self.subTest(end=end):
+                self.agent.position = Vector2(100, 100)
+                self.env.walls = [Wall(Vector2(200, 100), end)]
+                self.env.step([Action(1, 0, 1, 0, False)], dt=2)
+                self.assertAlmostEqual(self.agent.position.x, 190)
+
+    def test_movement_beyond_endpoint_is_unblocked(self):
+        self.env.walls = [Wall(Vector2(200, 200), Vector2(200, 400))]
+        self.env.step([Action(1, 0, 1, 0, False)], dt=1)
+        self.assertEqual(self.agent.position, Vector2(300, 100))
+
+    def test_reversed_wall_endpoints_and_approach_from_either_side(self):
+        for start, end in (
+            (Vector2(200, 0), Vector2(200, 600)),
+            (Vector2(200, 600), Vector2(200, 0)),
+        ):
+            for x, move, expected in ((100, 1, 190), (300, -1, 210)):
+                with self.subTest(start=start, x=x):
+                    self.agent.position = Vector2(x, 100)
+                    self.env.walls = [Wall(start, end)]
+                    self.env.step([Action(move, 0, 1, 0, False)], dt=2)
+                    self.assertAlmostEqual(self.agent.position.x, expected)
+
+    def test_slide_into_world_boundary_cannot_escape_bounds(self):
+        self.env.walls = [Wall(Vector2(200, 0), Vector2(200, 600))]
+        self.env.step([Action(1, 1, 1, 0, False)], dt=10)
+        self.assertAlmostEqual(self.agent.position.x, 190)
+        self.assertAlmostEqual(self.agent.position.y, 590)
+
+    def test_beam_stops_at_nearest_wall_and_still_pierces_front_targets(self):
+        near = Entity(Vector2(150, 100))
+        front = Entity(Vector2(170, 100))
+        behind = Entity(Vector2(205, 100))
+        self.env.entities.extend([near, front, behind])
+        self.env.walls = [
+            Wall(Vector2(300, 0), Vector2(300, 600)),
+            Wall(Vector2(200, 0), Vector2(200, 600)),
+        ]
+        self.env.step([Action(0, 0, 1, 0, True)], dt=0)
+        self.assertEqual(self.agent.shot_end, Vector2(200, 100))
+        self.assertEqual(self.env.entities, [self.agent, behind])
+
+    def test_beam_parallel_collinear_endpoint_and_reverse(self):
+        cases = [
+            (Vector2(100, 110), Vector2(400, 110), (Vector2(200, 100), Vector2(300, 100)), Vector2(400, 110)),
+            (Vector2(100, 100), Vector2(400, 100), (Vector2(200, 100), Vector2(300, 100)), Vector2(200, 100)),
+            (Vector2(400, 100), Vector2(100, 100), (Vector2(200, 100), Vector2(300, 100)), Vector2(300, 100)),
+            (Vector2(100, 100), Vector2(400, 100), (Vector2(200, 100), Vector2(200, 200)), Vector2(200, 100)),
+            (Vector2(100, 100), Vector2(400, 100), (Vector2(100, 50), Vector2(100, 150)), Vector2(100, 100)),
+            (Vector2(100, 100), Vector2(400, 100), (Vector2(200, 100), Vector2(200, 100)), Vector2(200, 100)),
+        ]
+        for start, end, endpoints, expected in cases:
+            with self.subTest(start=start, end=end, endpoints=endpoints):
+                self.env.walls = [Wall(*endpoints)]
+                result = fire_beam(start, end, self.agent, self.env)
+                self.assertEqual(result, (start, expected))
 
 
 class EnvironmentTests(unittest.TestCase):
@@ -329,9 +427,10 @@ class PlayerTests(unittest.TestCase):
 
 
 class RendererTests(unittest.TestCase):
-    def test_main_runs_human_controls_and_hitscan(self):
+    def test_interactive_demo_runs_controls_and_wall_blocks_hitscan(self):
         original_flip = pygame.display.flip
         original_on_hit = Environment.on_hit
+        original_step = Environment.step
         keys = defaultdict(bool, {pygame.K_d: True})
 
         def finish_after_one_frame():
@@ -347,18 +446,65 @@ class RendererTests(unittest.TestCase):
             patch.object(
                 Environment, "on_hit", autospec=True, side_effect=original_on_hit
             ) as on_hit,
+            patch.object(
+                Environment, "step", autospec=True, side_effect=original_step
+            ) as step,
         ):
             try:
-                runpy.run_path(str(Path(__file__).with_name("main.py")), run_name="__main__")
-                on_hit.assert_called_once()
-                env, shooter, target = on_hit.call_args.args
+                runpy.run_path(str(Path(__file__).with_name("interactive_test.py")), run_name="__main__")
+                on_hit.assert_not_called()
+                env = step.call_args.args[0]
+                shooter = next(entity for entity in env.entities if isinstance(entity, Player))
                 self.assertIsInstance(shooter, Player)
                 self.assertGreater(shooter.position.x, 200)
-                self.assertNotIn(target, env.entities)
+                self.assertEqual(len(env.entities), 3)
+                self.assertEqual(shooter.shot_end, Vector2(500, 300))
+                self.assertEqual(len(env.walls), 2)
                 self.assertFalse(env.running)
                 self.assertFalse(pygame.display.get_init())
             finally:
                 pygame.display.quit()
+
+    def test_walls_are_drawn_as_segments_without_changing_simulation_state(self):
+        with patch.dict(os.environ, {"SDL_VIDEODRIVER": "dummy"}):
+            renderer = Renderer()
+        try:
+            self.assertEqual(renderer.walls, [])
+            walls = [
+                Wall(Vector2(50, 50), Vector2(150, 50)),
+                Wall(Vector2(200, 50), Vector2(200, 150)),
+                Wall(Vector2(250, 50), Vector2(350, 150)),
+            ]
+            endpoints = [(wall.start.copy(), wall.end.copy()) for wall in walls]
+            renderer.walls.extend(walls)
+            self.assertTrue(renderer.render())
+            for point in ((100, 50), (200, 100), (300, 100)):
+                self.assertEqual(
+                    renderer.screen.get_at(point)[:3], (120, 135, 155)
+                )
+            self.assertEqual(renderer.screen.get_at((100, 60))[:3], (24, 26, 32))
+            self.assertEqual(renderer.entities, [])
+            self.assertEqual(renderer.step_count, 0)
+            self.assertEqual(
+                [(wall.start, wall.end) for wall in renderer.walls], endpoints
+            )
+        finally:
+            renderer.close()
+
+    def test_rendered_beam_ends_at_wall(self):
+        with patch.dict(os.environ, {"SDL_VIDEODRIVER": "dummy"}):
+            renderer = Renderer()
+        try:
+            agent = Agent(Vector2(100, 100))
+            renderer.entities.append(agent)
+            renderer.walls.append(Wall(Vector2(200, 50), Vector2(200, 150)))
+            renderer.step([Action(0, 0, 1, 0, True)], dt=0)
+            renderer.render()
+            self.assertEqual(agent.shot_end, Vector2(200, 100))
+            self.assertEqual(renderer.screen.get_at((190, 100))[:3], (255, 235, 120))
+            self.assertEqual(renderer.screen.get_at((210, 100))[:3], (24, 26, 32))
+        finally:
+            renderer.close()
 
     def test_player_agent_guns_and_beam_are_drawn_without_movement(self):
         with patch.dict(os.environ, {"SDL_VIDEODRIVER": "dummy"}):

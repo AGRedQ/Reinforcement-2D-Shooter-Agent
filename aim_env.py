@@ -9,7 +9,8 @@ from gymnasium import spaces
 from pygame import Vector2
 
 from entities import Action, Agent, Entity
-from environment import Environment, Renderer
+from environment import Environment
+from renderer import Renderer
 
 
 class AimEnv(gym.Env):

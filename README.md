@@ -9,6 +9,22 @@
 - Environment: The main Environment in which the Entities are in. Used for training headlessly.
 - Renderer: Using Pygame library, render the Environment and all its citizens at a fixed speed.
 
+## Playground walls
+
+Run `python interactive_test.py` to see two sample wall segments in the player-controlled
+playground. Walls are stored separately in `Environment.walls` as
+`Wall(start, end)` objects and drawn as six-pixel-wide lines. Other environments
+start with no walls, preserving Experiment 1. Wall segments block circular
+agent bodies and beams. Movement uses swept collision (including segment
+endpoints) and slides along walls instead of tunneling through on large steps.
+Bodies must start outside walls; contact is permitted. Up to eight contacts are
+resolved per step, after which any remaining movement is discarded for safety.
+The drawn six-pixel width is cosmetic: collision uses the mathematical segment.
+Beams stop at the nearest wall, including endpoint and collinear intersections,
+and still pierce targets before it. Targets centered on or behind the blocking
+surface are protected, even if their circular body overlaps it.
+Walls do not yet hide threats in observations or implement fog of war.
+
 ## Actions
 
 - `Action(move_x, move_y, aim_x, aim_y, fire)` supplies one action per living Agent.
@@ -75,7 +91,7 @@ learned policy instead. `--eval-seed` chooses target positions and initial aims;
 both seeds with the same model and software reproduces stochastic playback.
 Changing the sampling seed has no effect on deterministic actions. Playback
 never trains or saves the model and preserves the caller's Torch CPU RNG state.
-The original human-controlled demo remains available via `python main.py`.
+The original human-controlled demo remains available via `python interactive_test.py`.
 
 The scripted aimer lives in [scripted_bot.py](scripted_bot.py). Run it directly
 to watch the scripted baseline without loading or training a PPO model.
