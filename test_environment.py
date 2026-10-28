@@ -9,7 +9,16 @@ from unittest.mock import patch
 import pygame
 from pygame import Vector2
 
-from entities import Action, Agent, Entity, Player, Wall, fire_beam
+from entities import (
+    Action,
+    Agent,
+    Entity,
+    Player,
+    Wall,
+    fire_beam,
+    has_line_of_sight,
+    is_in_field_of_view,
+)
 from environment import Environment
 from renderer import Renderer
 
@@ -114,6 +123,34 @@ class WallCollisionTests(unittest.TestCase):
                 self.env.walls = [Wall(*endpoints)]
                 result = fire_beam(start, end, self.agent, self.env)
                 self.assertEqual(result, (start, expected))
+
+    def test_line_of_sight_is_blocked_only_by_walls_between_points(self):
+        wall = Wall(Vector2(150, 50), Vector2(150, 150))
+        self.assertFalse(
+            has_line_of_sight(Vector2(100, 100), Vector2(200, 100), [wall])
+        )
+        self.assertTrue(
+            has_line_of_sight(Vector2(100, 100), Vector2(140, 100), [wall])
+        )
+        self.assertTrue(
+            has_line_of_sight(Vector2(100, 100), Vector2(200, 300), [wall])
+        )
+
+    def test_field_of_view_is_unlimited_range_and_uses_half_angle(self):
+        origin = Vector2(100, 100)
+        direction = Vector2(1, 0)
+        self.assertTrue(
+            is_in_field_of_view(origin, direction, Vector2(700, 100), 45)
+        )
+        self.assertTrue(
+            is_in_field_of_view(origin, direction, Vector2(200, 200), 45)
+        )
+        self.assertFalse(
+            is_in_field_of_view(origin, direction, Vector2(200, 250), 45)
+        )
+        self.assertFalse(
+            is_in_field_of_view(origin, Vector2(), Vector2(200, 100), 45)
+        )
 
 
 class EnvironmentTests(unittest.TestCase):

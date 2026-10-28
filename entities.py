@@ -176,6 +176,33 @@ def wall_intersection_fraction(start: Vector2, end: Vector2, wall: Wall) -> floa
     return max(0.0, near) if max(0.0, near) <= min(1.0, far) else None
 
 
+def is_in_field_of_view(
+    origin: Vector2,
+    direction: Vector2,
+    target: Vector2,
+    half_angle_degrees: float,
+) -> bool:
+    """Return whether a point is in an unlimited-range cone around direction."""
+    if not math.isfinite(half_angle_degrees) or not 0 <= half_angle_degrees <= 180:
+        raise ValueError("Field-of-view half-angle must be finite and in [0, 180].")
+    offset = target - origin
+    if offset.length_squared() == 0:
+        return True
+    if direction.length_squared() == 0:
+        return False
+    threshold = math.cos(math.radians(half_angle_degrees))
+    magnitude = direction.length() * offset.length()
+    return direction.dot(offset) + 1e-12 * magnitude >= threshold * magnitude
+
+
+def has_line_of_sight(start: Vector2, end: Vector2, walls: list[Wall]) -> bool:
+    """Return whether the segment between two points intersects no wall."""
+    return all(
+        wall_intersection_fraction(start, end, wall) is None
+        for wall in walls
+    )
+
+
 def fire_beam(
     start: Vector2,
     end: Vector2,

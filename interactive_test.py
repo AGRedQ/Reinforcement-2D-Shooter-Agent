@@ -12,6 +12,8 @@ def run_interactive_test():
         Player(Vector2(200, 300)),
         Agent(Vector2(600, 300)),
     ])
+    player = next(entity for entity in env.entities if isinstance(entity, Player))
+    env.enable_field_of_view(player, half_angle_degrees=45)
     try:
         while env.render():
             actions = [
