@@ -193,10 +193,4 @@ The saved model verifies the training pipeline but does **not** meet the
 Experiment 1 goal yet. Improving learning is the next experiment; these results
 do not establish that PPO itself is unsuitable.
 
-## References
-- Reinforcement Learning Agent for a 2D Shooter Game (https://arxiv.org/pdf/2509.15042)
-- Generalized Advantage Estimation, GAE (https://arxiv.org/abs/1506.02438)
 
-## Some ideas
-- Curriculum Learning, which is being used 
-- Behavior Cloning using stripted bots, inspired by (2509.15042), not used yet.
