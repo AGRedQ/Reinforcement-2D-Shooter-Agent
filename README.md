@@ -46,6 +46,38 @@ Walls do not yet hide threats in observations or implement fog of war.
 
 - Experiment 5: A small playable game for friends to play on and compete with the Agent.
 
+## Experiment 2: Training with movement and vision
+
+[mechanics_env.py](mechanics_env.py) adapts the reusable simulation for training
+with the mechanics shown in the interactive playground. It controls one Agent
+against one stationary target, with its two fixed walls and
+45-degree half-angle field of view. The Agent's observation contains its
+normalized position and heading, target-relative position only when the target
+is both inside its field of view and unobstructed, a visibility indicator,
+weapon cooldown, remaining episode time, and the known wall map. A hidden target
+has a zero relative offset and a false visibility indicator.
+
+Every reset samples wall-clear positions for the Agent and target, keeps them at
+least 100 pixels apart, and randomizes the Agent's initial heading. Gymnasium's
+seeded RNG makes the generated scenario reproducible for a given seed.
+
+The five-value action maps to the complete `Action` contract: movement x/y are
+quantized to `-1`, `0`, or `1`; aim x/y are continuous direction components;
+and a positive fire value requests a shot. The Agent moves and aims through the
+core `Environment.step`; wall collision, line-of-sight checks, and beam blocking
+remain implemented by the shared simulation. Episodes end on a hit or after
+600 steps. Rewards are +0.2 once after moving at least 75 pixels from the spawn,
++1 for a hit, -0.001 per missed shot, and -0.001 per step. The movement milestone
+is direction-agnostic: it encourages the initial move-and-shoot behavior without
+rewarding exploration, target visibility, or travel after the milestone. The
+original Experiment 1 trainer remains unchanged.
+
+```powershell
+python train_mechanics.py train --steps 100000 --seed 0
+python train_mechanics.py watch --model models\mechanics.zip --episodes 5
+python -m unittest test_mechanics_env -q
+```
+
 ## Experiment 1: Training
 
 Install dependencies with `python -m pip install -r requirements.txt`.
