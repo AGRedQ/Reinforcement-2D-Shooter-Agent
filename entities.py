@@ -12,13 +12,14 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class Action:
-    """Aim is a target direction vector; (0, 0) keeps the current heading."""
+    """Control movement, optional absolute aim, or a discrete turn command."""
 
     move_x: int
     move_y: int
-    aim_x: float
-    aim_y: float
-    fire: bool
+    aim_x: float = 0.0
+    aim_y: float = 0.0
+    fire: bool = False
+    turn: int | None = None
 
 class Wall:
     def __init__(self, start: Vector2, end: Vector2):
@@ -39,6 +40,8 @@ class Agent(Entity):
         super().__init__(position)
         self.shoot_cooldown = 0.0
         self.aim_lerp_speed = 10.0
+        self.slow_turn_rate = 30.0
+        self.fast_turn_rate = 180.0
         self.aim_x = 1.0
         self.aim_y = 0.0
         self.shot_start = position.copy()
@@ -60,6 +63,17 @@ class Agent(Entity):
         new_degree = (current_degree + difference * weight) % 360
         self.aim_x = math.cos(math.radians(new_degree))
         self.aim_y = math.sin(math.radians(new_degree))
+
+    def update_turn(self, turn: int, dt: float) -> None:
+        """Turn at a fixed discrete rate: slow (-1/1) or fast (-2/2)."""
+        if turn not in (-2, -1, 0, 1, 2):
+            raise ValueError("turn must be -2, -1, 0, 1, or 2.")
+        if not math.isfinite(dt) or dt < 0:
+            raise ValueError("dt must be finite and non-negative.")
+        rate = self.fast_turn_rate if abs(turn) == 2 else self.slow_turn_rate
+        heading = math.atan2(self.aim_y, self.aim_x) + math.radians(turn * rate * dt)
+        self.aim_x = math.cos(heading)
+        self.aim_y = math.sin(heading)
 
 
 class Player(Agent):

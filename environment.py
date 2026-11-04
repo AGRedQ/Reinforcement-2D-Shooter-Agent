@@ -56,10 +56,13 @@ class Environment:
         for action in actions:
             if action.move_x not in (-1, 0, 1) or action.move_y not in (-1, 0, 1):
                 raise ValueError("Movement components must be -1, 0, or 1.")
-            if not math.isfinite(action.aim_x):
-                raise ValueError("aim_x must be finite.")
-            if not math.isfinite(action.aim_y):
-                raise ValueError("aim_y must be finite.")
+            if action.turn is None:
+                if not math.isfinite(action.aim_x):
+                    raise ValueError("aim_x must be finite.")
+                if not math.isfinite(action.aim_y):
+                    raise ValueError("aim_y must be finite.")
+            elif action.turn not in (-2, -1, 0, 1, 2):
+                raise ValueError("turn must be -2, -1, 0, 1, or 2.")
             if not isinstance(action.fire, bool):
                 raise ValueError("fire must be a boolean.")
 
@@ -88,7 +91,10 @@ class Environment:
             agent.position.y = max(
                 agent.radius, min(self.bounds.y - agent.radius, agent.position.y)
             )
-            agent.update_aim(action.aim_x, action.aim_y, dt)
+            if action.turn is None:
+                agent.update_aim(action.aim_x, action.aim_y, dt)
+            else:
+                agent.update_turn(action.turn, dt)
 
         for agent, action in zip(agents, actions):
             if agent in self.entities and action.fire and agent.shoot_cooldown <= 0:

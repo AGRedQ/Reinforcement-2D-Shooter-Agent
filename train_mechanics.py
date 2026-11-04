@@ -1,4 +1,4 @@
-"""Train or watch a PPO policy in the mechanics environment."""
+"""Train or watch a PPO policy in the discrete-action mechanics environment."""
 
 import argparse
 from pathlib import Path

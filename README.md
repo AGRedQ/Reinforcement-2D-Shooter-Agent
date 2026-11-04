@@ -61,14 +61,16 @@ Every reset samples wall-clear positions for the Agent and target, keeps them at
 least 100 pixels apart, and randomizes the Agent's initial heading. Gymnasium's
 seeded RNG makes the generated scenario reproducible for a given seed.
 
-The five-value action maps to the complete `Action` contract: movement x/y are
-quantized to `-1`, `0`, or `1`; aim x/y are continuous direction components;
-and a positive fire value requests a shot. The Agent moves and aims through the
-core `Environment.step`; wall collision, line-of-sight checks, and beam blocking
-remain implemented by the shared simulation. Episodes end on a hit or after
-600 steps. Rewards are +0.2 once after moving at least 75 pixels from the spawn,
-+1 for a hit, -0.001 per missed shot, and -0.001 per step. The movement milestone
-is direction-agnostic: it encourages the initial move-and-shoot behavior without
+The three-value discrete action selects one of nine movement directions (including
+idle), one of five turn commands (fast left, slow left, hold, slow right, fast
+right), and whether to fire. Slow turns are 30 degrees per second and fast turns
+are 180 degrees per second, allowing precise shots without continuously changing
+an absolute aim target. The Agent moves and turns through the core
+`Environment.step`; wall collision, line-of-sight checks, and beam blocking remain
+implemented by the shared simulation. Episodes end on a hit or after 600 steps.
+Rewards are +0.2 once after moving at least 75 pixels from the spawn, +1 for a
+hit, -0.001 per missed shot, and -0.001 per step. The movement milestone is
+direction-agnostic: it encourages the initial move-and-shoot behavior without
 rewarding exploration, target visibility, or travel after the milestone. The
 original Experiment 1 trainer remains unchanged.
 

@@ -20,7 +20,7 @@ from renderer import Renderer
 
 
 class MechanicsEnv(gym.Env):
-    """Navigate the interactive-test layout and eliminate its stationary target."""
+    """Navigate the interactive-test layout using discrete movement and turns."""
 
     metadata = {"render_modes": ["human"], "render_fps": 60}
     dt = 1 / 60
@@ -37,6 +37,18 @@ class MechanicsEnv(gym.Env):
         ((500.0, 200.0), (500.0, 400.0)),
     )
     observation_size = 17
+    movement_actions = (
+        (0, 0),
+        (0, -1),
+        (0, 1),
+        (-1, 0),
+        (1, 0),
+        (-1, -1),
+        (1, -1),
+        (-1, 1),
+        (1, 1),
+    )
+    turn_actions = (-2, -1, 0, 1, 2)
 
     def __init__(self, render_mode: str | None = None, max_steps: int = 600):
         super().__init__()
@@ -47,7 +59,7 @@ class MechanicsEnv(gym.Env):
         self.render_mode = render_mode
         self.max_steps = max_steps
         self.simulation = Renderer() if render_mode == "human" else Environment()
-        self.action_space = spaces.Box(-1.0, 1.0, shape=(5,), dtype=np.float32)
+        self.action_space = spaces.MultiDiscrete([len(self.movement_actions), 5, 2])
         low = np.full(self.observation_size, -1.0, dtype=np.float32)
         high = np.ones(self.observation_size, dtype=np.float32)
         low[6:9] = 0.0
@@ -146,14 +158,6 @@ class MechanicsEnv(gym.Env):
             "episode_steps": self.simulation.step_count,
         }
 
-    @staticmethod
-    def _movement_component(value: float) -> int:
-        if value <= -1 / 3:
-            return -1
-        if value >= 1 / 3:
-            return 1
-        return 0
-
     def reset(
         self, *, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[np.ndarray, dict[str, Any]]:
@@ -190,18 +194,16 @@ class MechanicsEnv(gym.Env):
     ) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         if self._needs_reset:
             raise gym.error.ResetNeeded("Call reset() before stepping or after an episode ends.")
-        action = np.asarray(action, dtype=np.float32)
+        action = np.asarray(action, dtype=np.int64)
         if not self.action_space.contains(action):
-            raise ValueError("Action must contain five finite values in [-1, 1].")
-        request_fire = bool(action[4] > 0)
+            raise ValueError("Action must be movement, turn, and fire indices.")
+        move_x, move_y = self.movement_actions[int(action[0])]
+        turn = self.turn_actions[int(action[1])]
+        request_fire = bool(action[2])
         ready = self.agent.shoot_cooldown - self.dt <= 0
         fired = request_fire and ready
         core_action = Action(
-            self._movement_component(float(action[0])),
-            self._movement_component(float(action[1])),
-            float(action[2]),
-            float(action[3]),
-            request_fire,
+            move_x, move_y, fire=request_fire, turn=turn
         )
         self.simulation.step([core_action], dt=self.dt)
         self.shots += int(fired)

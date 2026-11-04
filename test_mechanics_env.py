@@ -54,11 +54,11 @@ class MechanicsEnvTests(unittest.TestCase):
         self.env.reset(seed=1)
         self.env.agent.position = Vector2(200, 300)
         self.env.agent.aim_x, self.env.agent.aim_y = 1, 0
-        action = np.array([0.8, 0.0, 1.0, 0.0, -1.0], dtype=np.float32)
+        action = np.array([4, 4, 0], dtype=np.int64)
         self.env.step(action)
         self.assertAlmostEqual(self.env.agent.position.x, 200 + 200 / 60)
         self.assertAlmostEqual(self.env.agent.position.y, 300)
-        self.assertGreater(self.env.agent.aim_x, 0)
+        self.assertGreater(self.env.agent.aim_y, 0)
         self.assertEqual(self.env.shots, 0)
 
     def test_walls_block_movement_and_shots_using_core_mechanics(self):
@@ -66,7 +66,7 @@ class MechanicsEnvTests(unittest.TestCase):
         self.env.agent.position = Vector2(400, 212)
         self.env.target.position = Vector2(400, 150)
         self.env.agent.aim_x, self.env.agent.aim_y = 0, -1
-        self.env.step(np.array([0, -1, 0, -1, 1], dtype=np.float32))
+        self.env.step(np.array([1, 2, 1], dtype=np.int64))
         self.assertAlmostEqual(self.env.agent.position.y, 210)
         self.assertIn(self.env.target, self.env.simulation.entities)
         self.assertEqual(self.env.shots, 1)
@@ -78,7 +78,7 @@ class MechanicsEnvTests(unittest.TestCase):
         self.env.agent.aim_x, self.env.agent.aim_y = -1, 0
         self.env.movement_reward_earned = True
         observation, reward, terminated, truncated, info = self.env.step(
-            np.array([0, 0, -1, 0, 1], dtype=np.float32)
+            np.array([0, 2, 1], dtype=np.int64)
         )
         self.assertTrue(terminated)
         self.assertFalse(truncated)
@@ -87,14 +87,14 @@ class MechanicsEnvTests(unittest.TestCase):
         self.assertEqual(info["shots"], 1)
         self.assertFalse(observation[6])
         with self.assertRaises(gym.error.ResetNeeded):
-            self.env.step(np.zeros(5, dtype=np.float32))
+            self.env.step(np.zeros(3, dtype=np.int64))
 
     def test_timeout_truncates_episode(self):
         env = MechanicsEnv(max_steps=1)
         self.addCleanup(env.close)
         env.reset(seed=1)
         _, reward, terminated, truncated, info = env.step(
-            np.zeros(5, dtype=np.float32)
+            np.array([0, 2, 0], dtype=np.int64)
         )
         self.assertFalse(terminated)
         self.assertTrue(truncated)
@@ -105,7 +105,7 @@ class MechanicsEnvTests(unittest.TestCase):
         self.env.reset(seed=1)
         self.env.agent_spawn = Vector2(200, 300)
         self.env.agent.position = self.env.agent_spawn.copy()
-        action = np.array([1, 0, 0, 0, 0], dtype=np.float32)
+        action = np.array([4, 2, 0], dtype=np.int64)
         for _ in range(22):
             _, reward, _, _, _ = self.env.step(action)
             self.assertEqual(reward, -self.env.step_penalty)
@@ -123,7 +123,7 @@ class MechanicsEnvTests(unittest.TestCase):
     def test_missed_shot_has_small_penalty(self):
         self.env.reset(seed=1)
         _, reward, _, _, _ = self.env.step(
-            np.array([0, 0, 0, -1, 1], dtype=np.float32)
+            np.array([0, 2, 1], dtype=np.int64)
         )
         self.assertAlmostEqual(
             reward, -self.env.missed_shot_penalty - self.env.step_penalty
