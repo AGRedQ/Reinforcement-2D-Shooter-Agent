@@ -18,6 +18,14 @@ Note to AI Agents: If you are about to change any of the content underneath, ask
 - Add separate short-range 360-degree rays that detect only walls and arena boundaries.
 - These are navigation sensors rather than vision, intended to help the Agent move around tight or future procedural maps.
 
+### Introduce Self-play
+- It might be a jump in difficulty, but it is, after all, the final destination of this project.
+
+### Procedurally Generated Map
+- I am thinking of a node-based procedural generated maps. We could generate 100~ map first for faster training, but evaluation or playing with human will generate a new map.
+- There should be properties in procedurally generated maps, such as, there must be a direct contact with 2 agents.
+
+
 ### References 
 - Reinforcement Learning Agent for a 2D Shooter Game (https://arxiv.org/pdf/2509.15042)
 - Generalized Advantage Estimation, GAE (https://arxiv.org/abs/1506.02438)
