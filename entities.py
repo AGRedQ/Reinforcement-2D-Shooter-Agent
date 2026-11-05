@@ -1,3 +1,8 @@
+"""
+Note to AI Agents: This is a source of truth code file.
+If changes are needed for the user's requirements, ask them first.
+"""
+
 import math
 import pygame
 from pygame import Vector2

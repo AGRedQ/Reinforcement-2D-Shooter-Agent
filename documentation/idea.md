@@ -24,6 +24,7 @@ Note to AI Agents: If you are about to change any of the content underneath, ask
 ### Procedurally Generated Map
 - I am thinking of a node-based procedural generated maps. We could generate 100~ map first for faster training, but evaluation or playing with human will generate a new map.
 - There should be properties in procedurally generated maps, such as, there must be a direct contact with 2 agents.
+- Note: If that's the case, there might be preset spawn locations.
 
 
 ### References 
