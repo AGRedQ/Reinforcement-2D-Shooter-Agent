@@ -476,6 +476,7 @@ class RendererTests(unittest.TestCase):
 
         with (
             patch.dict(os.environ, {"SDL_VIDEODRIVER": "dummy"}),
+            patch("sys.argv", ["interactive_test.py", "--fixed-layout"]),
             patch.object(pygame.key, "get_pressed", return_value=keys),
             patch.object(pygame.mouse, "get_pos", return_value=(600, 300)),
             patch.object(pygame.mouse, "get_pressed", return_value=(True, False, False)),

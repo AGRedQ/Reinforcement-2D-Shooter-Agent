@@ -1,7 +1,9 @@
 import math
+from collections.abc import Callable
 
 import pygame
 from environment import Environment
+from map_generation import NavigationMap
 from entities import (
     Agent,
     Player,
@@ -11,6 +13,26 @@ from entities import (
     turning_logic,
     wall_intersection_fraction,
 )
+
+def draw_navigation(
+    screen: pygame.Surface,
+    layout: NavigationMap,
+    visited: set[int],
+    font: pygame.font.Font,
+) -> None:
+    for first, second in layout.edges:
+        pygame.draw.line(screen, (48, 65, 75), layout.nodes[first], layout.nodes[second])
+    for index, node in enumerate(layout.nodes):
+        color = (100, 235, 150) if index in visited else (230, 190, 80)
+        pygame.draw.circle(screen, color, node, 5)
+    for index, label in (
+        (layout.agent_spawn, "Agent spawn"),
+        (layout.threat_spawn, "Threat spawn"),
+    ):
+        screen.blit(font.render(label, True, (220, 225, 235)), layout.nodes[index] + Vector2(8, 8))
+    text = f"Nodes: {len(visited)}/{len(layout.nodes)} | Yellow: new | Green: visited"
+    screen.blit(font.render(text, True, (220, 225, 235)), (10, 10))
+
 
 class Renderer(Environment):
     def __init__(self):
@@ -101,7 +123,12 @@ class Renderer(Environment):
             )
             pygame.draw.line(self.screen, color, observer.position, line_end, 1)
 
-    def render(self) -> bool:
+    def render(
+        self,
+        *,
+        draw_overlay: Callable[[pygame.Surface], None] | None = None,
+        hud_lines: tuple[str, ...] = (),
+    ) -> bool:
         """Draw the current state; return False when the window is closed."""
         if not self.running:
             return False
@@ -116,6 +143,8 @@ class Renderer(Environment):
             self.screen, (100, 110, 125), self.screen.get_rect(), width=2
         )
         self._draw_field_of_view()
+        if draw_overlay is not None:
+            draw_overlay(self.screen)
 
         for wall in self.walls:
             pygame.draw.line(
@@ -179,6 +208,22 @@ class Renderer(Environment):
                         center=(round(entity.position.x), round(entity.position.y - entity.radius - 8))
                     )
                     self.screen.blit(marker, marker_rect)
+
+        if hud_lines:
+            labels = [
+                self.vision_font.render(line, True, (235, 240, 245))
+                for line in hud_lines
+            ]
+            line_height = self.vision_font.get_linesize()
+            panel = pygame.Rect(
+                10,
+                self.screen.get_height() - len(labels) * line_height - 22,
+                max(label.get_width() for label in labels) + 12,
+                len(labels) * line_height + 12,
+            )
+            pygame.draw.rect(self.screen, (16, 18, 24), panel)
+            for index, label in enumerate(labels):
+                self.screen.blit(label, (panel.x + 6, panel.y + 6 + index * line_height))
 
         pygame.display.flip()
         self.clock.tick(60)

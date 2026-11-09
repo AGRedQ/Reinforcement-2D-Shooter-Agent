@@ -1,0 +1,50 @@
+run_dir: models/exploration
+num_threads: 1
+
+environment:
+  map_mode: fixed
+  map_seed: 0
+  random_spawn: false
+  columns: 4
+  rows: 3
+  max_walls: 4
+  ray_range: 200.0
+  tile_size: 50
+  new_tile_reward: 1
+  # Reward falls gently to about 2/3 of its initial value at full coverage.
+  reward_decay: 0.5
+  step_penalty: 0.0001
+  max_steps: 600
+
+train:
+  steps: 500000
+  seed: 0
+  device: cuda
+  log_interval: 10
+  ppo:
+    policy: MlpPolicy
+    n_steps: 250
+    batch_size: 250
+    n_epochs: 10
+    learning_rate: 0.0003
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_range: 0.2
+    ent_coef: 0.0
+    vf_coef: 0.5
+    max_grad_norm: 0.5
+    policy_kwargs:
+      net_arch: [128, 128]
+    verbose: 1
+
+watch:
+  episodes: 5
+  seed: 20000
+  device: cpu
+  checkpoint: final.zip
+
+evaluate:
+  episodes: 20
+  seed: 10000
+  device: cpu
+  checkpoint: final.zip

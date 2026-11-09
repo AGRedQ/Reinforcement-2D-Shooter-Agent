@@ -8,7 +8,7 @@ Note to AI Agents: If you are about to change any of the content underneath, ask
 
 ### Agent Memory
 - Preserve the enemy's last seen position and expose how long ago it was seen, without revealing its current hidden position.
-- This should prevent the Agent from immediately forgetting an enemy after losing line of sight. Recurrent PPO with an LSTM or GRU policy could be a later alternative or extension.
+- This should prevent the Agent from immediately forgetting an enemy after losing line of sight. Recurrent PPO with an LSTM or GRU policy could bWe a later alternative or extension.
 
 ### Cone-of-Vision Rays
 - Replace the current all-or-nothing enemy offset with rays inside the Agent's cone of vision.

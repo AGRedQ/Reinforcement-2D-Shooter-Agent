@@ -4,3 +4,63 @@ environment:
 
 modifiers:
   random_spawn: true
+
+training:
+  train_mechanics:
+    command: train
+    num_threads: 1
+    common:
+      model: models/mechanics.zip
+      no_walls: false
+      device: cpu
+      max_steps: 600
+    train:
+      steps: 100000
+      seed: 0
+    watch:
+      episodes: 5
+      seed: 10000
+    ppo:
+      policy: MlpPolicy
+      n_steps: 1024
+      batch_size: 64
+      verbose: 1
+    log_interval: 1
+  wallgen_navpoint:
+    command: train
+    num_threads: 1
+    common:
+      run_dir: models/wallgen-navpoint
+    train:
+      steps: 500000
+      seed: 0
+      # Positive N cycles 1..N; [N] fixes one seed; <= 0 generates random maps.
+      map_seed: [0]
+      max_walls: 4
+      max_steps: 600
+      eval_every: 50000
+      # Minimum episodes, rounded up to complete cycles of finite map selections.
+      eval_episodes: 100
+      device: cuda
+    watch:
+      episodes: 5
+      seed: 20000
+      checkpoint: final.zip
+      device: cpu
+    evaluate:
+      # Same complete-map-cycle rounding as train.eval_episodes.
+      episodes: 100
+      seed: 20000
+      checkpoint: final.zip
+      device: cpu
+    n_envs: 8
+    eval_seed: 10000
+    ppo:
+      policy: MlpPolicy
+      n_steps: 250
+      batch_size: 250
+      policy_kwargs:
+        net_arch: [128, 128]
+      verbose: 1
+    log_interval: 10
+    logger_formats: [stdout, csv]

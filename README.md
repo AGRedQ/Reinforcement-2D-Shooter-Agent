@@ -11,8 +11,31 @@
 
 ## Playground walls
 
-Run `python interactive_test.py` to see two sample wall segments in the player-controlled
-playground. Walls are stored separately in `Environment.walls` as
+Run `python -m tests.interactive_test --seed 0 --max-walls 16` to preview procedural
+walls and navigation nodes in the player-controlled playground. Change the seed
+to generate another reproducible layout. `--max-walls 0` gives an open arena;
+`--fixed-layout` restores the original two-wall demo.
+
+The generator uses an 8-by-6 grid of cell-center nodes. A randomized spanning
+tree stays open, and walls are placed only across other connections, so every
+node and both spawn points belong to one connected walkable graph. Cell spacing
+must exceed the agent diameter, providing body clearance along every graph edge.
+The player occupies the agent spawn; the stationary threat occupies a node at
+maximum graph distance from it. The additional idle Agent uses another node.
+Yellow nodes turn green on their first visit (within one player radius); the
+spawn node starts visited. Thin lines show traversable connections. These are
+debug overlays, not vision-restricted observations or automatic movement.
+
+The wall limit counts interior segments, including separate collinear segments,
+not the arena boundary. The generator uses up to the requested cap: at most 35
+walls fit this grid while keeping its spanning tree open. Node visits in the
+playground have no reward effect. The original mechanics training scenario stays
+unchanged; the separate navigation task below uses a smaller generated map.
+
+Validate generation, connectivity, movement clearance, and rendering with
+`python -m unittest tests.test_map_generation tests.test_environment -q`.
+
+Walls are stored separately in `Environment.walls` as
 `Wall(start, end)` objects and drawn as six-pixel-wide lines. Other environments
 start with no walls, preserving Experiment 1. Wall segments block circular
 agent bodies and beams. Movement uses swept collision (including segment
@@ -50,12 +73,15 @@ Walls do not yet hide threats in observations or implement fog of war.
 
 [mechanics_env.py](mechanics_env.py) adapts the reusable simulation for training
 with the mechanics shown in the interactive playground. It controls one Agent
-against one stationary target, with its two fixed walls and
+against one stationary target, with the original playground's two fixed walls and
 45-degree half-angle field of view. The Agent's observation contains its
 normalized position and heading, target-relative position only when the target
 is both inside its field of view and unobstructed, a visibility indicator,
-weapon cooldown, remaining episode time, and the known wall map. A hidden target
-has a zero relative offset and a false visibility indicator.
+weapon cooldown, remaining episode time, a last-seen target offset and age, and
+the known wall map. A hidden target has a zero current offset and a false
+visibility indicator. The last-seen offset is derived from the target's stored
+world position as the Agent moves; it expires two seconds after the last sighting
+and never updates while the target is hidden.
 
 Every reset samples wall-clear positions for the Agent and target, keeps them at
 least 100 pixels apart, and randomizes the Agent's initial heading. Gymnasium's
@@ -69,128 +95,175 @@ an absolute aim target. The Agent moves and turns through the core
 `Environment.step`; wall collision, line-of-sight checks, and beam blocking remain
 implemented by the shared simulation. Episodes end on a hit or after 600 steps.
 Rewards are +0.2 once after moving at least 75 pixels from the spawn, +1 for a
-hit, -0.001 per missed shot, and -0.001 per step. The movement milestone is
-direction-agnostic: it encourages the initial move-and-shoot behavior without
-rewarding exploration, target visibility, or travel after the milestone. The
-original Experiment 1 trainer remains unchanged.
+hit, +0.1 each for the first target sighting and first visible-target alignment,
+-0.001 per missed shot, and -0.001 per step. The three milestone rewards are
+each available once per episode, so the Agent cannot gain them by repeatedly
+moving, toggling line of sight, or holding aim on the target.
 
 ```powershell
-python train_mechanics.py train --steps 100000 --seed 0
-python train_mechanics.py watch --model models\mechanics.zip --episodes 5
-python -m unittest test_mechanics_env -q
+python -m training.train_mechanics train --steps 100000 --seed 0
+python -m training.train_mechanics watch --model models\mechanics.zip --episodes 5
+python -m training.train_mechanics train --no-walls --steps 100000 --seed 0 --model models\mechanics-open.zip
+python -m training.train_mechanics watch --no-walls --model models\mechanics-open.zip --episodes 5
+python -m unittest tests.test_mechanics_env -q
 ```
 
-## Experiment 1: Training
+`--no-walls` uses the same scenario, CoV, actions, rewards, spawn randomization,
+and observation shape, but removes wall collision and line-of-sight blocking.
+Its wall-map observation entries are zero.
 
-Install dependencies with `python -m pip install -r requirements.txt`.
-The Gymnasium adapter in [aim_env.py](aim_env.py) reuses the simulation without
-adding learning-specific rules to it. This is a baseline, not yet evidence that
-the Agent has mastered Experiment 1.
+The memory fields increase the observation from 17 to 21 values. Existing
+mechanics models use the old observation shape and must be retrained.
 
-- Each episode has one stationary Agent at the center and one stationary target.
-  Reset restores both, randomizes initial aim and target position using Gymnasium's
-  seeded RNG, keeps the target inside the bounds, and enforces an 80-pixel minimum
-  center-to-center distance. The playground's random-spawn modifier is not used.
-- Observation: six `float32` values: target offset x/y divided by the world
-  diagonal, current aim x/y, cooldown divided by the firing interval, and the
-  fraction of episode time remaining.
-- Action: three `float32` values in `[-1, 1]`: target aim x/y and fire request
-  (`> 0` fires; `<= 0` does not). Movement is always zero. Zero aim holds heading.
-- Each step advances exactly `1/60` second. Reward is `+1` for a hit, `-0.01`
-  per actual shot, and `-0.001` per step, plus an angular-accuracy bonus up to
-  `+0.0005` per step and `-0.002` for a missed shooting opportunity.
-  See [rewards.md](rewards.md) for all conditions, examples, and limitations.
-- A hit terminates the episode. After 300 steps (5 simulated seconds), a miss
-  truncates it. A hit on the final step counts as success, not timeout.
-- PPO uses Stable-Baselines3's MLP policy and built-in GAE. There is no behavioral
-  cloning, self-play, or automatic curriculum yet.
+## Multi-map navigation training
+
+Training entry points live in [training](training); run them as modules from
+the repository root. [wallgen_navpoint_training.py](training/wallgen_navpoint_training.py)
+trains a fresh PPO policy using [WallgenNavpointEnv](wallgen_navpoint_env.py).
+The easy layout has 12 nodes on a 4-by-3 grid, 200-pixel wall segments, and up to
+four walls by default. Map selection changes at episode resets:
+
+- `--map-seed "[1,2,3,4,5]"` cycles those exact seeds in order, repeatedly.
+- `--map-seed 5` cycles seeds 1 through 5.
+- `--map-seed "[5]"` uses only seed 5. `[0]` preserves the original fixed map.
+- `--map-seed 0` (or any negative integer) generates a fresh random map seed
+  for every episode.
+
+Vector workers start at staggered positions in the cycle, and each worker
+repeats the whole list. Walls, connections, spawns, and visited-node state all
+reset together. Spawns are fixed for each map seed; initial heading varies.
+The target is stationary; episodes end on a hit or after `max_steps` (600 by default).
+
+Both training entry points take their defaults from the `training` sections of
+[configs.yaml](configs.yaml), including CLI options, PPO settings, logging,
+thread count, and episode limits. Omitting the command uses the configured
+`command` (default `train`); explicit CLI options override YAML. For example:
 
 ```powershell
-python train.py train --steps 100000 --seed 0 --episodes 100
-python train.py evaluate --model models\experiment1.zip --episodes 1000 --eval-seed 20000
-python train.py evaluate --episodes 100 --sampling-seed 7 --output models\diagnostics.json
-python train.py watch --model models\experiment1.zip --episodes 5
-python train.py watch --model models\experiment1-shaped-500k.zip --episodes 10 --stochastic --sampling-seed 0
-python scripted_bot.py --episodes 10 --eval-seed 10000
-python -m unittest test_environment test_aim_env -q
+python -m training.wallgen_navpoint_training
+python -m training.wallgen_navpoint_training --map-seed 5 --device cpu
+python -m training.train_mechanics
 ```
 
-Training runs headlessly on CPU, saves `models\experiment1.zip`, and writes
-`models\experiment1.evaluation.json`. These outputs are git-ignored. PPO collects
-complete 1024-step rollouts, so the actual training step count rounds up.
-`watch` runs the same task in the Pygame playground; close the window to stop.
-Playback is deterministic by default. Add `--stochastic` to sample from the
-learned policy instead. `--eval-seed` chooses target positions and initial aims;
-`--sampling-seed` (default 0) independently controls sampled actions. Repeating
-both seeds with the same model and software reproduces stochastic playback.
-Changing the sampling seed has no effect on deterministic actions. Playback
-never trains or saves the model and preserves the caller's Torch CPU RNG state.
-The original human-controlled demo remains available via `python interactive_test.py`.
+Set `training.wallgen_navpoint.train.map_seed` to a YAML array such as
+`[1, 2, 3, 4, 5]`, a positive count, or `0` for random maps. The default `[0]`
+retains the old fixed-map behavior. Navigation training defaults to CUDA;
+select CPU in YAML or with `--device cpu` if CUDA is unavailable.
+Mechanics `--no-walls` enables the open arena; `--walls` overrides a YAML
+`no_walls: true` setting.
 
-The scripted aimer lives in [scripted_bot.py](scripted_bot.py). Run it directly
-to watch the scripted baseline without loading or training a PPO model.
-`--episodes` defaults to 5 and `--eval-seed` defaults to 10000, matching PPO
-playback's scenario seeds. Close the Pygame window to stop early.
-Evaluation imports the same scripted policy from this module.
+The observation has **66 float32 values**, all bounded by [-1, 1]:
 
-Evaluation compares deterministic PPO (`ppo`), sampled PPO (`ppo_stochastic`),
-a random policy, and a scripted aimer on
-the same seed-indexed scenarios (default seeds start at 10000, separate from the
-training RNG stream). It reports success rate, mean shots over all episodes,
-mean shots on successful episodes, mean time to hit on successful episodes,
-and mean return. Success-only metrics are `null` if there are no hits; do not
-interpret them without the success rate. Use fresh evaluation seeds for final
-testing after tuning and repeat training with multiple seeds before drawing
-conclusions. The scripted baseline is an aiming reference, not a proven optimal
-controller. A short smoke run verifies plumbing, not learning quality.
+- 0-12: the original combat, agent pose, cooldown, time, and target-memory fields.
+- 13-48: 12 `(relative_x / width, relative_y / height, visited)` triples in
+  row-major node order; visited flags are 0 or 1.
+- 49-65: 17 open-connection flags, iterating nodes row-major and emitting the
+  right connection then the downward connection where each exists.
 
-### Aiming and firing diagnostics
+Nodes and connectivity are globally known, but hidden target position is not
+exposed by these fields. The policy still controls all movement and firing;
+the graph does not choose routes for it. Fixed target spawns can be memorized;
+training on a finite seed list alone does not demonstrate unseen-map generalization.
 
-Evaluation includes these measurements for every policy. Observations and the
-action space are unchanged. Existing models can be evaluated without retraining;
-mean return uses the current reward rules in [rewards.md](rewards.md).
+The old +0.2 displacement milestone is **replaced** by first-visit bonuses.
+The spawn node starts visited without reward. Each other node gives `0.2 / 11`
+once per episode when the agent center is within its body radius of the node.
+The same visit update sets the observation flag and reward. Total exploration
+bonus is at most +0.2; hit, visibility, alignment, shot and time rewards are
+unchanged. Watch mode uses the same navigation overlay as the playground.
+Both training tasks' Pygame watch views show the live **episode reward total**,
+the latest step's reward, and the episode step count in a bottom-left HUD.
+The score includes all bonuses and penalties, resets each episode, and includes
+the terminal hit or timeout step. It is display/debug information only, also
+available as `episode_reward` and `last_reward` in `info`; policy observations,
+rewards, and saved-model compatibility are unchanged. The player-controlled
+playground has no RL reward score.
 
-| JSON field | Meaning |
-|---|---|
-| `mean_angular_error_degrees` | Absolute angle from current aim to target center, averaged over all executed steps (0 aligned, 180 facing away). |
-| `aligned_step_fraction` | Fraction of executed steps whose forward beam would intersect the target body, accounting for radius and distance. |
-| `aligned_shot_fraction` | Aligned actual shots divided by all actual shots; `null` if no shots were fired. |
-| `missed_fire_opportunity_fraction` | Aligned, cooldown-ready steps without a fire request divided by all aligned, ready steps; `null` if there were no opportunities. |
-| `episodes_without_shots`, `no_shot_episode_fraction` | Count and fraction of episodes without any actual shots. |
+For NVIDIA GPU training, activate the project virtual environment and install
+the optional CUDA wheel after the base requirements:
 
-Reports also include raw counts: `total_steps`, `total_shots`, `aligned_steps`,
-`aligned_shots`, `ready_aligned_steps`, and `missed_fire_opportunities`.
-Fractions pool counts across episodes rather than averaging episode fractions;
-longer episodes contribute more steps. All step measurements include the final
-step and use the heading **after turning**, when a shot would occur. Readiness
-uses the cooldown after that step's time decrement, before any new shot.
-A held fire request during cooldown is neither an actual shot nor a missed
-firing opportunity. These are diagnostic correlations, not proof of a failure's
-cause. In this one-target task, an aligned actual shot should end in a hit.
-The scripted aimer decides whether to fire using the pre-turn observation, so
-it can register a missed opportunity on the step that first turns into alignment;
-this metric does not imply that the scripted policy is an optimal controller.
+```powershell
+python -m pip install -r requirements.txt
+python -m pip install -r requirements-cuda.txt
+python -m training.wallgen_navpoint_training train --steps 500000 --device cuda --map-seed "[1,2,3,4,5]" --max-walls 4 --run-dir models\wallgen-navpoint
+python -m training.wallgen_navpoint_training watch --run-dir models\wallgen-navpoint --checkpoint best.zip
+python -m training.wallgen_navpoint_training evaluate --run-dir models\wallgen-navpoint --episodes 100 --seed 20000
+python -m unittest tests.test_reward_hud tests.test_wallgen_navpoint_env tests.test_wallgen_training tests.test_map_generation tests.test_environment -q
+```
 
-Both PPO modes use identical scenario seeds. Stochastic PPO samples from its
-learned distribution, rather than using the mean action. `--sampling-seed`
-(default 0) controls Torch's CPU action sampling separately from `--eval-seed`;
-evaluation preserves the caller's Torch RNG state. Repeat sampling seeds to
-assess sampling variability. Random actions use a separate NumPy RNG seeded
-with `--eval-seed`. Watch mode also supports optional stochastic playback.
-Evaluation prints JSON;
-`--output` optionally saves it without retraining or replacing the model.
+CUDA training fails explicitly if CUDA is unavailable; `--device cpu` is an
+explicit alternative. PyTorch's CUDA wheel includes its runtime; a compatible
+NVIDIA driver is required, not a separate system CUDA toolkit. The simulation
+still runs on CPU. Small MLP policies are not necessarily faster on GPU.
 
-### First baseline result
+By default eight vectorized environments use the configured map selection. Each PPO rollout contains
+2,000 transitions (250 per environment), with batch size 250 and two 128-unit
+hidden layers. `--steps` and `--eval-every` must be multiples of 2,000 so a 500k
+request trains on exactly 500,000 transitions. When changing YAML PPO settings,
+these multiples become `n_envs * ppo.n_steps`; the batch size must divide that
+rollout size. Evaluation steps do not count
+toward that budget.
 
-This historical run used only hit, shot, and time rewards, before the aiming
-bonus and missed-opportunity penalty were added.
+The default evaluates deterministically on at least 100 episodes at initialization, every
+50k training steps, and after the final update. Evaluation resets to the same
+map/heading seed streams starting at 10000. For finite map selections,
+`--eval-episodes` (training) and `--episodes` (evaluation) are minimums rounded
+up to complete map cycles. Every entry in the selected list receives the same
+number of completed episodes, regardless of worker count or episode duration;
+duplicate list entries retain their weighting. For example, 100 episodes over
+4 maps gives 25 per map; 100 over 128 maps becomes 128, one per map.
+This covers the training map selection, not a separate held-out map set.
+Random-map evaluation keeps the exact requested episode count and generates
+reproducible layouts from its own seed streams. Evaluation metrics include
+`requested_episodes`, actual `episodes`, and the completed episodes' `map_seeds`.
+Saved outputs include configuration, initial preview map geometry, CSV training
+metrics, JSONL evaluation metrics, periodic checkpoints, `final.zip`, and
+`best.zip` selected by hit rate then shorter mean episode duration, not reward.
+Separate evaluation defaults to seed 20000. Watch/evaluate load map settings
+and episode limits from the saved run, avoiding accidental mismatches. Watch
+mode cycles maps too. Legacy runs keep their original fixed map, including seed 0.
+Existing run directories are rejected rather than overwritten.
 
-With training seed 0, 100352 steps, and 100 evaluation scenarios starting at seed
-10000, deterministic PPO achieved 11% success, random actions 27%, and the
-scripted aimer 100%. The scripted aimer used one shot per success. This run used
-Stable-Baselines3 2.9.0, Gymnasium 1.4.0, and PyTorch 2.14.1 on CPU.
-The saved model verifies the training pipeline but does **not** meet the
-Experiment 1 goal yet. Improving learning is the next experiment; these results
-do not establish that PPO itself is unsuitable.
+`map_seeds.jsonl` records every training episode reset, with `env_index`,
+`episode` (zero-based per worker), and the concrete `map_seed`. It excludes
+environment-checker and evaluation resets, but includes the next episode
+automatically reset by SB3 at the final transition. Use the recorded seeds as
+an explicit array to replay layouts with the saved wall/grid settings.
+`map.json` is only the constructor's initial preview, labeled with its seed;
+it is not a record of all training maps (random mode previews seed 0).
 
+## Movement-only exploration baseline
 
+[side_implementations](side_implementations/README.md) contains an isolated PPO
+task with nine movement actions, 16 finite wall-distance rays plus position,
+and gently diminishing first-visit tile rewards. It supports fixed or random
+generated maps and optional random spawns, without targets, turning, or firing.
+Visited tiles are tracked by the environment but hidden from the policy.
+It reuses the shared simulation without changing the combat task.
+
+```powershell
+python -m side_implementations.train train
+python -m side_implementations.train watch
+```
+
+Defaults are in [side_implementations/configs.yaml](side_implementations/configs.yaml).
+See the task README for random-map commands, reward details, evaluation, and
+the limitations of hiding exploration history from a feed-forward policy.
+
+## Tests
+
+All automated tests and the interactive playground are grouped in [tests](tests).
+Run commands from the repository root:
+
+```powershell
+python -m unittest discover -s tests -t . -q
+python -m unittest tests.test_reward_hud -q
+python -m tests.interactive_test --seed 0 --max-walls 16
+```
+
+The playground is manual and is not included in automated test discovery.
+
+## Archived Experiment 1
+
+The retired stationary-target aiming task, its reward design, commands, and
+historical results are documented in [documentation/experiment1.md](documentation/experiment1.md).
