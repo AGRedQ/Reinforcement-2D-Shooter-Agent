@@ -1,6 +1,0 @@
-environment:
-  bounds: [800, 600]
-  spawn_player: false
-
-modifiers:
-  random_spawn: true

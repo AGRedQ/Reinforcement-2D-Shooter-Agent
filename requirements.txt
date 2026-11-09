@@ -1,7 +1,0 @@
-numpy
-pygame
-matplotlib
-gymnasium
-torch
-pyyaml
-stable-baselines3>=2.7,<3
