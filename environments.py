@@ -1,9 +1,10 @@
-"""Hunting environment: fixed map, moving threat, rewards and the curriculum."""
+"""Hunting and opt-in combat environments sharing maps, mechanics and curriculum."""
 
 from __future__ import annotations
 
 import math
 from collections import deque
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 import gymnasium as gym
@@ -14,6 +15,7 @@ from entities import (
     OBSERVATION_SIZE,
     Agent,
     Bullet,
+    ShootingThreat,
     Threat,
     Wall,
     circle_overlaps_boxes,
@@ -33,13 +35,18 @@ class MapLayout:
         self.boxes = walls_to_array(self.walls)
 
 
+def boundary_walls(width: float, height: float, thickness: float) -> list[Wall]:
+    return [
+        Wall(0, 0, width, thickness),
+        Wall(0, height - thickness, width, thickness),
+        Wall(0, 0, thickness, height),
+        Wall(width - thickness, 0, thickness, height),
+    ]
+
+
 def default_map() -> MapLayout:
     width, height, t = 800.0, 800.0, 20.0
-    walls = [
-        Wall(0, 0, width, t),
-        Wall(0, height - t, width, t),
-        Wall(0, 0, t, height),
-        Wall(width - t, 0, t, height),
+    walls = boundary_walls(width, height, t) + [
         Wall(370, 370, 60, 60),
         Wall(170, 160, 140, 30),
         Wall(490, 610, 140, 30),
@@ -58,6 +65,10 @@ class RewardConfig:
     """Added on top of ``hit`` for the killing shot."""
     wasted_shot: float = 0.1
     """Subtracted when a bullet is fired while no enemy ray sees the threat."""
+    damage_taken: float = 0.04
+    """Penalty per health point lost in combat mode."""
+    death: float = 3.0
+    """Additional penalty when the agent dies in combat mode."""
 
 
 @dataclass(frozen=True)
@@ -117,7 +128,12 @@ class Curriculum:
 class HuntEnv(gym.Env):
     """The agent hunts a rule-based threat that respawns whenever it dies.
 
-    The agent cannot die, so episodes always end by truncation after ``max_steps``.
+    By default the agent cannot die and episodes truncate after ``max_steps``.
+    With ``shoot_back=True``, a ``ShootingThreat`` damages the agent and death
+    terminates the episode. Enemy bullets already in flight survive threat respawns.
+    ``map_seeds`` opts into generated layouts, cycling once per reset. An explicit
+    reset seed restarts the map cycle as well as the spawn RNG; threat respawns
+    do not change maps. Without ``map_seeds``, the fixed/custom layout is preserved.
     Observation: egocentric vector of size ``OBSERVATION_SIZE`` (see ``entities.Agent.observation``).
     Action: ``MultiDiscrete([9, 3, 2])`` = (move, aim, fire).
     """
@@ -132,21 +148,38 @@ class HuntEnv(gym.Env):
         dt: float = 1.0 / 30.0,
         stage: int = 0,
         replay_probability: float = 0.2,
+        shoot_back: bool = False,
+        map_seeds: Sequence[int] | None = None,
     ):
         super().__init__()
+        if map_seeds is not None:
+            if layout is not None:
+                raise ValueError("Choose either a fixed layout or map_seeds, not both.")
+            if isinstance(map_seeds, range):
+                if not map_seeds or min(map_seeds[0], map_seeds[-1]) < 0:
+                    raise ValueError("map_seeds must contain nonnegative integers.")
+            else:
+                map_seeds = tuple(map_seeds)
+                if not map_seeds or any(type(seed) is not int or seed < 0 for seed in map_seeds):
+                    raise ValueError("map_seeds must be a nonempty sequence of nonnegative integers.")
+        self.map_seeds = map_seeds
+        self.map_seed: int | None = None
+        self._map_index = 0
         self.layout = layout or default_map()
         self.reward_config = reward_config or RewardConfig()
         self.max_steps = max_steps
         self.dt = dt
         self.replay_probability = replay_probability
+        self.shoot_back = shoot_back
         self.set_stage(stage)
 
         self.observation_space = gym.spaces.Box(-1.0, 1.0, shape=(OBSERVATION_SIZE,), dtype=np.float32)
         self.action_space = gym.spaces.MultiDiscrete(ACTION_DIMS)
 
         self.agent = Agent(agent_id=0)
-        self.threat = Threat()
+        self.threat = ShootingThreat() if shoot_back else Threat()
         self.bullets: list[Bullet] = []
+        self.threat_bullets: list[Bullet] = []
         self.steps = 0
         self.episode_stage = stage
         self.episode_stats: dict[str, float] = {}
@@ -166,6 +199,15 @@ class HuntEnv(gym.Env):
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         super().reset(seed=seed)
+        if self.map_seeds is not None:
+            # MapLayout lives here, so import the generator after module initialization.
+            from map_generation import generate_map
+
+            if seed is not None:
+                self._map_index = 0
+            self.map_seed = self.map_seeds[self._map_index % len(self.map_seeds)]
+            self.layout = generate_map(self.map_seed)
+            self._map_index += 1
         options = options or {}
         replay = False
         if "stage" in options:
@@ -177,6 +219,7 @@ class HuntEnv(gym.Env):
             self.episode_stage = self.stage
 
         self.bullets = []
+        self.threat_bullets = []
         self.steps = 0
         self._detection_delays = []
         self.episode_stats = {
@@ -185,10 +228,15 @@ class HuntEnv(gym.Env):
             "hits": 0.0,
             "shots": 0.0,
             "wasted_shots": 0.0,
+            "threat_shots": 0.0,
+            "damage_taken": 0.0,
+            "deaths": 0.0,
             "distance": 0.0,
             "stage": float(self.episode_stage),
             "replay": float(replay),
         }
+        if self.map_seed is not None:
+            self.episode_stats["map_seed"] = self.map_seed
         cfg = self.stage_config
         for _ in range(50):
             self.agent.reset(self._random_free_position(), float(self.np_random.uniform(-math.pi, math.pi)))
@@ -200,10 +248,10 @@ class HuntEnv(gym.Env):
         self._spawn_threat(threat_position)
         self.agent.sense(self.layout.boxes, [self.threat])
         self._update_detection()
-        return self.agent.observation(), {}
+        return self.agent.observation(), ({"map_seed": self.map_seed} if self.map_seed is not None else {})
 
     def step(self, action):
-        if self.steps >= self.max_steps:
+        if self.steps >= self.max_steps or (self.shoot_back and not self.agent.alive):
             raise RuntimeError("Episode is over; call reset() before step().")
         cfg = self.reward_config
         stats = self.episode_stats
@@ -224,9 +272,10 @@ class HuntEnv(gym.Env):
         self.threat.update(self.dt, boxes, self.np_random, self._random_free_position, self.agent)
 
         for b in self.bullets:
-            if b.update(self.dt, boxes, [self.threat]) is None:
+            target = b.update(self.dt, boxes, [self.threat])
+            if target is None:
                 continue
-            self.threat.take_damage(b.damage)
+            target.take_damage(b.damage)
             stats["hits"] += 1
             reward += cfg.hit
             if not self.threat.alive:
@@ -236,6 +285,22 @@ class HuntEnv(gym.Env):
                 self._spawn_threat()
                 break
         self.bullets = [b for b in self.bullets if b.alive]
+
+        if isinstance(self.threat, ShootingThreat):
+            enemy_bullet = self.threat.shoot(self.dt, boxes, self.agent)
+            if enemy_bullet is not None:
+                self.threat_bullets.append(enemy_bullet)
+                stats["threat_shots"] += 1
+        for b in self.threat_bullets:
+            if b.update(self.dt, boxes, [self.agent]) is not None:
+                damage = self.agent.take_damage(b.damage)
+                stats["damage_taken"] += damage
+                reward -= cfg.damage_taken * damage
+        self.threat_bullets = [b for b in self.threat_bullets if b.alive]
+        terminated = self.shoot_back and not self.agent.alive
+        if terminated:
+            stats["deaths"] = 1.0
+            reward -= cfg.death
         self.steps += 1
 
         self.agent.sense(boxes, [self.threat])
@@ -244,12 +309,12 @@ class HuntEnv(gym.Env):
         stats["reward"] += reward
         truncated = self.steps >= self.max_steps
         info: dict = {}
-        if truncated:
+        if terminated or truncated:
             delays = self._detection_delays + ([] if self._threat_detected else [self.steps - self._spawn_step])
             stats["detect_steps"] = float(np.mean(delays))
             stats["length"] = float(self.steps)
             info["episode"] = dict(stats)
-        return self.agent.observation(), float(reward), False, truncated, info
+        return self.agent.observation(), float(reward), terminated, truncated, info
 
     def _update_detection(self) -> None:
         if not self._threat_detected and self.agent.enemy_detected.any():

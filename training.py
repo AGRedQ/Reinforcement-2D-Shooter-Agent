@@ -6,6 +6,10 @@ Watch:  python training.py --watch [--model NAME] [--stage N]
 ``--model``: empty uses ``models/mlp_ppo_currilearning.pt``. A given name is looked up in
 ``models/`` (``.pt`` is added if it has no extension); training resumes from it if it
 exists, otherwise a new model is created under that name.
+
+Training automatically opens a local Streamlit/Plotly dashboard with live
+metrics, CSV export and a graceful Stop button. ``--no-dashboard`` disables it.
+Closing the browser does not interrupt training; the server exits with training.
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ import os
 import signal
 import time
 from collections import deque
+from collections.abc import Sequence
 from multiprocessing.connection import Connection
 from pathlib import Path
 
@@ -24,9 +29,10 @@ import torch
 import torch.nn as nn
 from torch.distributions import Categorical
 
+from dashboard import MetricsDashboard
 from entities import ACTION_DIMS, OBSERVATION_SIZE
 from environments import STAGES, Curriculum, HuntEnv
-from renderer import MetricsDashboard, Renderer
+from renderer import Renderer
 
 MODELS_DIR = Path(__file__).resolve().parent / "models"
 DEFAULT_MODEL_NAME = "mlp_ppo_currilearning.pt"
@@ -40,6 +46,10 @@ EPISODE_METRICS = {
     "hit_rate": "Hit rate (last 100 ep)",
     "mean_wasted_shots": "Mean wasted shots (last 100 ep)",
     "mean_detect_steps": "Steps to first detection (last 100 ep)",
+}
+COMBAT_METRICS = {
+    "mean_damage_taken": "Damage taken (last 100 ep)",
+    "death_rate": "Death rate (last 100 ep)",
 }
 PPO_METRICS = {
     "policy_loss": "Policy loss",
@@ -280,7 +290,7 @@ def compute_gae(rewards, values, dones, last_values, gamma: float, lam: float):
     return advantages, advantages + values
 
 
-def train(args) -> None:
+def train(args, *, shoot_back: bool = False, map_seeds: Sequence[int] | None = None) -> None:
     torch.manual_seed(args.seed)
     torch.set_num_threads(1)  # the small MLP gains little from threads; leave the cores to env workers
     model_path = resolve_model_path(args.model)
@@ -308,15 +318,21 @@ def train(args) -> None:
         "max_steps": args.max_steps,
         "stage": curriculum.stage,
         "replay_probability": args.replay_probability,
+        "shoot_back": shoot_back,
+        "map_seeds": map_seeds,
     }
     envs = VecEnv(args.num_envs, env_kwargs, seed=args.seed + progress["global_step"], render=args.render)
     dashboard = None
     if not args.no_dashboard:
         dashboard = MetricsDashboard(
-            {**EPISODE_METRICS, **PPO_METRICS},
+            {
+                **EPISODE_METRICS,
+                **(COMBAT_METRICS if shoot_back else {}),
+                **PPO_METRICS,
+            },
             reference_lines={"mean_reward": args.promotion_reward},
             title=f"Training - {model_path.name}",
-        ).start()
+        )
 
     n, t_max = args.num_envs, args.rollout_steps
     buf_obs = torch.zeros(t_max, n, OBSERVATION_SIZE)
@@ -329,6 +345,12 @@ def train(args) -> None:
     start_time, start_step = time.time(), progress["global_step"]
     obs = torch.as_tensor(envs.observations)
     try:
+        if dashboard is not None:
+            dashboard.set_info(
+                f"model     {model_path.name}\nsteps     {progress['global_step']:,}\nepisodes  {progress['episodes']:,}\n"
+                f"maps      {map_seeds if map_seeds is not None else 'fixed arena'}"
+            )
+            dashboard.start()
         while True:
             rollout_complete = True
             for t in range(t_max):
@@ -397,6 +419,7 @@ def train(args) -> None:
                 dashboard.log(progress["global_step"], **ppo_stats)
                 dashboard.set_info(
                     f"model     {model_path.name}\n"
+                    f"maps      {map_seeds if map_seeds is not None else 'fixed arena'}\n"
                     f"steps     {progress['global_step']:,}\n"
                     f"episodes  {progress['episodes']:,}"
                     + (f" / {args.total_episodes:,}" if args.total_episodes else "")
@@ -439,13 +462,17 @@ def log_episode_metrics(dashboard: MetricsDashboard | None, progress: dict, curr
         hit_rate=sum(e["hits"] for e in recent) / shots if shots else 0.0,
         mean_wasted_shots=mean("wasted_shots"),
         mean_detect_steps=mean("detect_steps"),
+        **(
+            {"mean_damage_taken": mean("damage_taken"), "death_rate": mean("deaths")}
+            if "death_rate" in dashboard.metrics else {}
+        ),
     )
 
 
 # --------------------------------------------------------------------------- watch
 
 
-def watch(args) -> None:
+def watch(args, *, shoot_back: bool = False, map_seeds: Sequence[int] | None = None) -> None:
     model_path = resolve_model_path(args.model)
     if not model_path.exists():
         raise FileNotFoundError(f"No model at {model_path}")
@@ -455,27 +482,35 @@ def watch(args) -> None:
     policy.eval()
     stage = args.stage if args.stage is not None else checkpoint["curriculum"]["stage"]
 
-    env = Renderer(max_steps=args.max_steps, stage=stage, replay_probability=0.0, fps=args.fps)
+    env = Renderer(
+        max_steps=args.max_steps, stage=stage, replay_probability=0.0,
+        fps=args.fps, shoot_back=shoot_back, map_seeds=map_seeds,
+    )
     for episode in range(args.episodes):
-        obs, _ = env.reset(seed=args.seed + episode)
-        truncated = False
-        while not truncated and env.window_open:
+        seed = args.seed + episode if map_seeds is None else (args.seed if episode == 0 else None)
+        obs, _ = env.reset(seed=seed)
+        done = False
+        while not done and env.window_open:
             with torch.no_grad():
                 action, _, _ = policy.act(torch.as_tensor(obs), deterministic=not args.stochastic)
-            obs, _, _, truncated, info = env.step(action.numpy())
+            obs, _, terminated, truncated, info = env.step(action.numpy())
+            done = terminated or truncated
         if not env.window_open:
             break
         print(f"episode {episode}: {info['episode']}")
     env.close()
 
 
-def parse_args(argv=None):
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--model", default=None, help=f"model name in models/ (default {DEFAULT_MODEL_NAME})")
+def parse_args(
+    argv=None, *, description: str | None = __doc__,
+    default_model: str = DEFAULT_MODEL_NAME, random_maps: bool = False,
+):
+    p = argparse.ArgumentParser(description=description, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--model", default=default_model, help=f"model name in models/ (default {default_model})")
     p.add_argument("--max-steps", type=int, default=1000, help="steps per episode")
     p.add_argument("--total-episodes", type=int, default=None, help="stop training after this many episodes")
     p.add_argument("--render", action="store_true", help="show one training environment live")
-    p.add_argument("--no-dashboard", action="store_true", help="train without the metrics window")
+    p.add_argument("--no-dashboard", action="store_true", help="train without the Streamlit browser dashboard")
     p.add_argument("--num-envs", type=int, default=8)
     p.add_argument("--rollout-steps", type=int, default=256, help="steps per environment per PPO update")
     p.add_argument("--lr", type=float, default=3e-4)
@@ -498,6 +533,10 @@ def parse_args(argv=None):
     p.add_argument("--episodes", type=int, default=5, help="episodes for --watch")
     p.add_argument("--fps", type=int, default=30, help="frame rate for --watch")
     p.add_argument("--stochastic", action="store_true", help="sample actions in --watch instead of argmax")
+    if random_maps:
+        from map_generation import MAP_SEEDS_HELP, parse_map_seeds
+
+        p.add_argument("--map-seeds", type=parse_map_seeds, default="9", help=MAP_SEEDS_HELP)
     return p.parse_args(argv)
 
 

@@ -150,10 +150,10 @@ class Bullet:
     traveled: float = 0.0
     alive: bool = True
 
-    def update(self, dt: float, boxes: np.ndarray, targets: list[Threat]) -> Threat | None:
+    def update(self, dt: float, boxes: np.ndarray, targets: list[Threat | Agent]) -> Threat | Agent | None:
         """Advance with swept collision. Returns the target hit, if any."""
         speed = float(np.linalg.norm(self.velocity))
-        step = speed * dt
+        step = min(speed * dt, max(0.0, self.max_range - self.traveled))
         direction = (self.velocity / speed)[None, :]
         wall_t = float(ray_aabb_distances(self.position, direction, boxes)[0])
 
@@ -174,7 +174,7 @@ class Bullet:
             self.alive = False
             return None
 
-        self.position = self.position + self.velocity * dt
+        self.position = self.position + direction[0] * step
         self.traveled += step
         if self.traveled >= self.max_range:
             self.alive = False
@@ -418,3 +418,39 @@ class Threat:
         steer = desired - 1.5 * (whiskers * clearance[:, None]).sum(axis=0)
         norm = float(np.hypot(*steer))
         return steer / norm if norm > 1e-6 else desired
+
+
+@dataclass
+class ShootingThreat(Threat):
+    """Moving threat that fires at the agent when it has a clear line of sight."""
+
+    color: tuple[int, int, int] = (220, 80, 180)
+    fire_cooldown: float = 0.8
+    bullet_speed: float = 450.0
+    bullet_damage: float = 10.0
+    bullet_range: float = 600.0
+    cooldown: float = 0.0
+
+    def reset(self, position: np.ndarray, speed: float, evade: bool) -> None:
+        super().reset(position, speed, evade)
+        self.cooldown = self.fire_cooldown
+
+    def shoot(self, dt: float, boxes: np.ndarray, agent: Agent) -> Bullet | None:
+        self.cooldown = max(0.0, self.cooldown - dt)
+        if not self.alive or not agent.alive or self.cooldown > 1e-9:
+            return None
+        offset = agent.position - self.position
+        distance = float(np.linalg.norm(offset))
+        if distance <= self.radius + 2.0 or distance - agent.radius > self.bullet_range:
+            return None
+        direction = offset / distance
+        wall_distance = float(ray_aabb_distances(self.position, direction[None, :], boxes)[0])
+        if wall_distance <= distance - agent.radius:
+            return None
+        self.cooldown = self.fire_cooldown
+        return Bullet(
+            position=self.position + direction * (self.radius + 2.0),
+            velocity=direction * self.bullet_speed,
+            damage=self.bullet_damage,
+            max_range=self.bullet_range,
+        )
