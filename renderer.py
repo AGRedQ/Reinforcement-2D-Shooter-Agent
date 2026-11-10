@@ -8,7 +8,8 @@ Streamlit browser dashboard is implemented in ``dashboard.py``.
 to your aim, Q/E or the arrow keys aim, Space fires. ``--stage N`` picks the stage.
 ``--map-seeds`` selects generated maps with the same seed-cycle rules as the
 random-map trainer; combine with ``--shoot-back`` to play the full combat mode.
-R toggles discrete rays, T toggles movement trails, and F toggles the frame cap.
+R toggles discrete rays, V toggles optional geometric sight shading,
+T toggles movement trails, and F toggles the frame cap.
 Angular-region previews use translucent, wall-clipped fills; legacy rays stay
 unfilled. Rendering does not change policy observations.
 Use ``--headless --screenshot PATH --seed N`` to capture a reproducible frame.
@@ -17,6 +18,7 @@ Use ``--headless --screenshot PATH --seed N`` to capture a reproducible frame.
 from __future__ import annotations
 
 import argparse
+import math
 import os
 from collections import deque
 from pathlib import Path
@@ -25,8 +27,9 @@ import numpy as np
 import pygame
 
 from dashboard import MetricsDashboard
-from entities import CONE_RAY_INDICES, ENEMY_REGION_EDGES, MOVE_DIRECTIONS, RAY_LENGTH, Player, ray_aabb_distances
+from entities import CONE_RAY_INDICES, ENEMY_REGION_EDGES, MOVE_DIRECTIONS, RAY_LENGTH, VISION_CONE_DEG, Player, ray_aabb_distances
 from environments import STAGES, HuntEnv
+from visibility import visibility_polygon
 
 BACKGROUND = (20, 27, 35)
 WALL_COLOR = (67, 80, 95)
@@ -44,7 +47,7 @@ RENDER_SCALE = 2
 class Renderer(HuntEnv):
     """``HuntEnv`` with a Pygame front end.
 
-    Keys: ``R`` toggles discrete rays, ``T`` trails, ``F`` the FPS cap.
+    Keys: ``R`` toggles rays, ``V`` sight shading, ``T`` trails, ``F`` the FPS cap.
     Closing the window stops rendering but keeps the environment running, so
     training is never interrupted by it.
     """
@@ -53,7 +56,8 @@ class Renderer(HuntEnv):
 
     def __init__(
         self, *args, fps: int = 30, render_every: int = 1, show_rays: bool = True,
-        human_opponent: bool = False, player_hacks: bool = False, **kwargs,
+        human_opponent: bool = False, player_hacks: bool = False,
+        show_visibility: bool = False, **kwargs,
     ):
         if human_opponent:
             kwargs["shoot_back"] = True
@@ -66,6 +70,7 @@ class Renderer(HuntEnv):
         self.fps = fps
         self.render_every = max(1, render_every)
         self.show_rays = player_hacks if human_opponent else show_rays
+        self.show_visibility = show_visibility and not human_opponent
         self.show_trails = not human_opponent
         self.cap_fps = fps > 0
         self.window_open = True
@@ -78,6 +83,8 @@ class Renderer(HuntEnv):
         self._floor: pygame.Surface | None = None
         self._walls: pygame.Surface | None = None
         self._region_overlay: pygame.Surface | None = None
+        self._ambient_light: pygame.Surface | None = None
+        self._cone_light: pygame.Surface | None = None
         self._trails: tuple[deque[np.ndarray], deque[np.ndarray]] = (
             deque(maxlen=48), deque(maxlen=48),
         )
@@ -136,6 +143,8 @@ class Renderer(HuntEnv):
                 self.show_rays = self.player_hacks
             if event.type == pygame.KEYDOWN and event.key == pygame.K_r and not self.human_opponent:
                 self.show_rays = not self.show_rays
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_v and not self.human_opponent:
+                self.show_visibility = not self.show_visibility
             if event.type == pygame.KEYDOWN and event.key == pygame.K_f:
                 self.cap_fps = not self.cap_fps
             if event.type == pygame.KEYDOWN and event.key == pygame.K_t and not self.human_opponent:
@@ -143,6 +152,8 @@ class Renderer(HuntEnv):
 
         screen = self._screen
         self._arena.blit(self._floor, (0, 0))
+        if self.show_visibility:
+            self._draw_visibility()
         if self.show_trails:
             self._draw_trails()
         if self.show_rays and self.agent.angular_regions:
@@ -222,6 +233,54 @@ class Renderer(HuntEnv):
             pygame.draw.rect(self._walls, WALL_COLOR, rect)
             pygame.draw.rect(self._walls, (98, 115, 131), rect, RENDER_SCALE)
             pygame.draw.line(self._walls, (127, 143, 155), rect.topleft, rect.topright, RENDER_SCALE)
+
+        self._light_layer = pygame.Surface(size, pygame.SRCALPHA)
+        self._light_mask = pygame.Surface(size, pygame.SRCALPHA)
+
+    @staticmethod
+    def _radial_light(color, opacity: int) -> pygame.Surface:
+        """Cache a gentle radial falloff with a soft final 18 world units."""
+        radius = int(RAY_LENGTH)
+        axis = np.arange(-radius, radius, dtype=np.float32)
+        distance = np.hypot(axis[:, None], axis[None, :])
+        fade = np.clip((radius - distance) / 18.0, 0, 1)
+        alpha = opacity * (1.0 - 0.3 * np.minimum(distance / radius, 1)) * fade
+        light = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+        light.fill((*color, 0))
+        pixels = pygame.surfarray.pixels_alpha(light)
+        pixels[:] = alpha.astype(np.uint8)
+        del pixels
+        return pygame.transform.smoothscale(light, (radius * 2 * RENDER_SCALE,) * 2)
+
+    def _paint_light(self, points: np.ndarray, light: pygame.Surface, *, feather_cone: bool = False) -> None:
+        self._light_layer.fill((0, 0, 0, 0))
+        self._light_mask.fill((0, 0, 0, 0))
+        pygame.draw.polygon(self._light_mask, (255, 255, 255, 255), [self._point(p) for p in points])
+        if feather_cone:
+            # Feather only the angular edges; wall shadows must stay occluded.
+            arc = points[1:]
+            delta = arc - self.agent.position
+            relative = (np.arctan2(delta[:, 1], delta[:, 0]) - self.agent.angle + math.pi) % math.tau - math.pi
+            half = math.radians(VISION_CONE_DEG) / 2
+            midpoint_angles = (relative[:-1] + relative[1:]) / 2
+            fades = np.clip((half - np.abs(midpoint_angles)) / math.radians(2.5), 0, 1)
+            for i in np.flatnonzero(fades < 1):
+                triangle = [self._point(p) for p in (self.agent.position, arc[i], arc[i + 1])]
+                pygame.draw.polygon(self._light_mask, (255, 255, 255, round(255 * fades[i])), triangle)
+        origin = self.agent.position - RAY_LENGTH
+        self._light_layer.blit(light, self._point(origin))
+        self._light_layer.blit(self._light_mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+        self._arena.blit(self._light_layer, (0, 0))
+
+    def _draw_visibility(self) -> None:
+        if self._ambient_light is None:
+            self._ambient_light = self._radial_light((126, 163, 169), 85)
+            self._cone_light = self._radial_light((255, 202, 115), 105)
+        agent = self.agent
+        ambient = visibility_polygon(agent.position, self.layout.boxes)
+        self._paint_light(ambient, self._ambient_light)
+        cone = visibility_polygon(agent.position, self.layout.boxes, angle=agent.angle, spread=math.radians(VISION_CONE_DEG))
+        self._paint_light(np.vstack((agent.position, cone)), self._cone_light, feather_cone=True)
 
     def _draw_trails(self) -> None:
         for trail, color in zip(self._trails, ((53, 87, 108), (105, 77, 68))):
@@ -338,6 +397,7 @@ class Renderer(HuntEnv):
             screen.blit(self._font.render(text, True, TEXT_COLOR), (18, y + 40 + i * 22))
         controls = (
             f"WASD move   Q/E aim   SPACE fire   R rays {'on' if self.show_rays else 'off'}   "
+            f"V sight {'on' if self.show_visibility else 'off'}   "
             f"T trails {'on' if self.show_trails else 'off'}   "
             f"F cap {'on' if self.cap_fps else 'off'}   ESC close"
         )
@@ -389,6 +449,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=None, help="reproduce initial spawns")
     parser.add_argument("--screenshot", type=Path, help="save the initial frame as PNG, then exit")
     parser.add_argument("--headless", action="store_true", help="capture a screenshot without a window")
+    parser.add_argument("--visibility", action="store_true", help="show continuous geometric sight shading")
     parser.add_argument("--shoot-back", action="store_true", help="play against a shooting threat; death ends the episode")
     parser.add_argument("--map-seeds", type=parse_map_seeds, default=None, help=MAP_SEEDS_HELP + "; omitted: fixed arena")
     args = parser.parse_args()
@@ -400,7 +461,7 @@ def main() -> None:
 
     env = Renderer(
         stage=args.stage, max_steps=args.max_steps, replay_probability=0.0,
-        shoot_back=args.shoot_back, map_seeds=args.map_seeds,
+        shoot_back=args.shoot_back, map_seeds=args.map_seeds, show_visibility=args.visibility,
     )
     try:
         if args.screenshot is not None:

@@ -60,7 +60,7 @@ class RendererTests(unittest.TestCase):
         self.assertEqual(tuple(screen.get_at((250, 110)))[:3], BACKGROUND)
         self.assertEqual(tuple(screen.get_at((200, 100)))[:3], BULLET_COLOR)
         self.assertEqual(tuple(screen.get_at((300, 100)))[:3], THREAT_BULLET_COLOR)
-        self.assertFalse(hasattr(env, "show_visibility"))
+        self.assertFalse(env.show_visibility)
         for key in (pygame.K_r, pygame.K_t, pygame.K_f):
             pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=key))
         env.render()
