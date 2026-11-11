@@ -1,12 +1,15 @@
 """Combat PPO training with generated maps, curriculum and the live dashboard.
 
 Train: python training_random_map.py --map-seeds 9 [--render]
-Deep Sets: python training_random_map.py --bullet-sensing --map-seeds 9 [--render]
+Flag exploration: python training_random_map.py --exploration-bonus --map-seeds '[4]' --render
+Legacy sensing: python training_random_map.py --no-bullet-sensing --no-angular-regions --map-seeds 9
 Watch Deep Sets: python training_random_map.py --watch --bullet-sensing --map-seeds '[2,7,11]'
 Fight Deep Sets: python training_random_map.py --play-against --bullet-sensing --map-seeds '[4]'
 Fight MLP: python training_random_map.py --play-against --model mlp_ppo_raised_damage
 Angular regions: python training_random_map.py --angular-regions --bullet-sensing --map-seeds 9 --render
 Watch angular: python training_random_map.py --watch --model angular_deep_sets_ppo
+Self-play: python training_random_map.py --self-play --map-seeds '[4]' --render
+Watch duel: python training_random_map.py --self-play --watch --map-seeds '[4]' --stochastic
 Watch: python training_random_map.py --watch --map-seeds '[2,7,11]'
 Play:  python renderer.py --shoot-back --map-seeds '[5]'
 
@@ -35,14 +38,29 @@ On normal stop or Ctrl+C, remaining episodes are saved as a partial sample and
 report.html provides an offline summary and charts. Resumes create separate
 reports with cumulative episode numbers. This does not change checkpoint saving.
 
-Default checkpoint: checkpoints/mlp_ppo_raised_damage.pt. Training automatically resumes
+Default checkpoint: checkpoints/angular_deep_sets_ppo.pt. Training automatically resumes
 it if present. --model NAME can fine-tune a compatible hunting/combat checkpoint;
 that checkpoint will be overwritten.
 
---bullet-sensing selects a separate default: checkpoints/deep_sets_ppo_random_map.pt.
-This starts a new policy, not a migration of the existing MLP. Resume/watch with
---bullet-sensing, or --model deep_sets_ppo_random_map; checkpoint metadata restores
-the architecture automatically. Existing MLP checkpoints remain supported.
+Bullet sensing and angular regions are enabled by default for new policies.
+--no-bullet-sensing and --no-angular-regions disable them independently.
+With both disabled the default is mlp_ppo_raised_damage.pt; bullet sensing alone
+uses deep_sets_ppo_random_map.pt, and angular regions alone uses angular_mlp_ppo.pt.
+Existing checkpoints restore their architecture/sensing from metadata when no
+explicit sensing switches are supplied. Explicit incompatible switches produce
+an error rather than migrating weights. Use --model NAME for a separate experiment.
+
+--exploration-bonus opts scripted-enemy training into anchor-relative travel
+shaping, without adding observation inputs. An invisible anchor is placed at
+spawn, after each kill, and every 5 simulated seconds. New maximum displacement
+earns 0.0005 per pixel up to 100 pixels (+0.05 per anchor), capped at +0.5 per
+episode across all anchors. Only transitions with no enemy detected at either
+end earn the bonus; terminal deaths earn none. Combat movement still advances
+the maximum, so it cannot be claimed later. Returning incurs no penalty.
+The interval resets after each new anchor; reaching 100 pixels does not reset it.
+Repeated routes can pay after interval resets: this rewards travel, not novelty.
+Reports/dashboard show exploration reward separately; total reward includes it.
+The switch must be supplied again on resume. Self-play/watch/play do not use it.
 
 Deep Sets senses all live hostile bullets within the continuous 60-degree viewing
 cone and 600-unit range, occluded by walls. Each bullet supplies normalized local
@@ -61,7 +79,7 @@ agent rays; --player-hacks starts enabled. Hacks never change AI observations.
 Player deaths respawn as in hunting; agent death/time limit resets the round.
 --episodes sets the round count. No training or checkpoint writes occur.
 
---angular-regions opts new policies into six gap-free enemy regions with boundaries
+Angular sensing gives new policies six gap-free enemy regions with boundaries
 -30,-15,-5,0,5,15,30 degrees relative to aim. Enemy circle overlap and wall
 occlusion determine each region's presence and nearest visible surface distance.
 A separate zero-width center ray supplies its own flag/distance (alignment, not
@@ -72,6 +90,25 @@ previous action 14. With Deep Sets the decision MLP receives 96 values.
 Defaults: angular_deep_sets_ppo.pt with --bullet-sensing, otherwise angular_mlp_ppo.pt.
 This starts fresh; legacy checkpoints keep their old ray observations. Resume,
 watch and --play-against restore sensing from metadata with --model NAME.
+
+--self-play trains 1v1 using two identical Agent bodies, angular regions and Deep
+Sets bullet sensing on both sides. A new run copies weights (not optimizer or
+training progress) from --self-play-init angular_deep_sets_ppo by default, leaving
+that source unchanged. The separate output, self_play_ppo.pt, resumes automatically.
+Missing/incompatible source checkpoints produce an error; no silent fresh start.
+Curriculum and replay are disabled. Both fighters spawn separated with random
+headings; neither receives privileged observations or world coordinates.
+The red opponent samples actions from a frozen policy, refreshed from the blue
+learner every --opponent-refresh PPO updates (default 50), only between rollouts.
+Only blue supplies PPO training data. Refreshes can occur during a round.
+First death ends the round; simultaneous deaths and time limits are terminal
+draws, without respawns or timeout value bootstrapping. Existing hit, kill,
+damage, death and wasted-shot rewards apply; no exploration or memory is added.
+Reports/dashboard include win/loss/draw rates and opponent generation. Rates are
+against changing opponents, not a fixed benchmark. Checkpoints retain the frozen
+opponent and refresh schedule for resume/watch. Use --stochastic when watching
+to match training action sampling; otherwise both sides use argmax.
+R/T/F retain their preview controls. --play-against is not supported for duels.
 """
 
 from models.ppo import parse_args as parse_training_args
@@ -83,7 +120,8 @@ DEFAULT_MODEL_NAME = "mlp_ppo_raised_damage.pt"
 
 def parse_args(argv=None):
     return parse_training_args(
-        argv, description=__doc__, default_model=DEFAULT_MODEL_NAME, random_maps=True
+        argv, description=__doc__, default_model=DEFAULT_MODEL_NAME, random_maps=True,
+        default_sensing=True,
     )
 
 

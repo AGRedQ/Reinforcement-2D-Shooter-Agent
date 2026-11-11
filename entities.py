@@ -313,7 +313,7 @@ class Agent:
             ])
         return np.asarray(features, dtype=np.float32).reshape(-1, BULLET_FEATURE_SIZE)
 
-    def sense(self, boxes: np.ndarray, enemies: list[Threat]) -> None:
+    def sense(self, boxes: np.ndarray, enemies: list[Threat | Agent]) -> None:
         directions = self.ray_directions()
         self.wall_distances = np.minimum(ray_aabb_distances(self.position, directions, boxes), RAY_LENGTH)
         if self.angular_regions:
@@ -329,7 +329,7 @@ class Agent:
         self.enemy_detected = (enemy_t < self.wall_distances[CONE_RAY_INDICES]) & (enemy_t < RAY_LENGTH)
         self.enemy_distances = np.where(self.enemy_detected, enemy_t, RAY_LENGTH)
 
-    def _sense_regions(self, boxes: np.ndarray, enemies: list[Threat]) -> None:
+    def _sense_regions(self, boxes: np.ndarray, enemies: list[Threat | Agent]) -> None:
         self.enemy_detected = np.zeros(NUM_ENEMY_REGIONS, dtype=bool)
         self.enemy_distances = np.full(NUM_ENEMY_REGIONS, RAY_LENGTH)
         self.region_points = np.zeros((NUM_ENEMY_REGIONS, 2))

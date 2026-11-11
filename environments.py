@@ -158,6 +158,7 @@ class HuntEnv(gym.Env):
         map_seeds: Sequence[int] | None = None,
         bullet_sensing: bool = False,
         angular_regions: bool = False,
+        exploration_bonus: bool = False,
     ):
         super().__init__()
         if map_seeds is not None:
@@ -180,6 +181,7 @@ class HuntEnv(gym.Env):
         self.replay_probability = replay_probability
         self.shoot_back = shoot_back
         self.bullet_sensing = bullet_sensing
+        self.exploration_bonus = exploration_bonus
         self.set_stage(stage)
 
         obs_size = ANGULAR_OBSERVATION_SIZE if angular_regions else OBSERVATION_SIZE
@@ -264,6 +266,9 @@ class HuntEnv(gym.Env):
         else:
             threat_position = self._threat_spawn_position(cfg)
         self._spawn_threat(threat_position)
+        if self.exploration_bonus:
+            self.episode_stats["exploration_reward"] = 0.0
+            self._reset_exploration_anchor()
         self.agent.sense(self.layout.boxes, [self.threat])
         self._update_detection()
         return self._observation(), ({"map_seed": self.map_seed} if self.map_seed is not None else {})
@@ -284,6 +289,7 @@ class HuntEnv(gym.Env):
         stats = self.episode_stats
         boxes = self.layout.boxes
         reward = 0.0
+        killed = False
 
         threat_visible = bool(self.agent.enemy_detected.any())
         previous_position = self.agent.position
@@ -306,6 +312,7 @@ class HuntEnv(gym.Env):
             stats["hits"] += 1
             reward += cfg.hit
             if not self.threat.alive:
+                killed = True
                 stats["kills"] += 1
                 reward += cfg.kill_bonus
                 self.bullets = []
@@ -333,6 +340,12 @@ class HuntEnv(gym.Env):
         self.agent.sense(boxes, [self.threat])
         self._update_detection()
 
+        if self.exploration_bonus:
+            if killed:
+                self._reset_exploration_anchor()
+            reward += self._exploration_reward(
+                searching=not threat_visible and not self.agent.enemy_detected.any() and not terminated
+            )
         stats["reward"] += reward
         truncated = self.steps >= self.max_steps
         info: dict = {}
@@ -342,6 +355,24 @@ class HuntEnv(gym.Env):
             stats["length"] = float(self.steps)
             info["episode"] = dict(stats)
         return self._observation(), float(reward), terminated, truncated, info
+
+    def _reset_exploration_anchor(self) -> None:
+        self._exploration_anchor = self.agent.position.copy()
+        self._exploration_anchor_step = self.steps
+        self._exploration_maximum = 0.0
+
+    def _exploration_reward(self, *, searching: bool) -> float:
+        progress = min(100.0, float(np.linalg.norm(self.agent.position - self._exploration_anchor)))
+        increment = max(0.0, progress - self._exploration_maximum)
+        self._exploration_maximum = max(self._exploration_maximum, progress)
+        earned = min(
+            increment * 0.0005,
+            max(0.0, 0.5 - self.episode_stats["exploration_reward"]),
+        ) if searching else 0.0
+        self.episode_stats["exploration_reward"] += earned
+        if (self.steps - self._exploration_anchor_step) * self.dt >= 5.0:
+            self._reset_exploration_anchor()
+        return earned
 
     def _update_detection(self) -> None:
         if not self._threat_detected and self.agent.enemy_detected.any():

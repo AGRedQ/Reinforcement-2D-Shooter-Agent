@@ -27,7 +27,10 @@ import numpy as np
 import pygame
 
 from dashboard import MetricsDashboard
-from entities import CONE_RAY_INDICES, ENEMY_REGION_EDGES, MOVE_DIRECTIONS, RAY_LENGTH, VISION_CONE_DEG, Player, ray_aabb_distances
+from entities import (
+    CONE_RAY_INDICES, ENEMY_REGION_EDGES, MOVE_DIRECTIONS, RAY_LENGTH,
+    VISION_CONE_DEG, Agent, Player, ray_aabb_distances,
+)
 from environments import STAGES, HuntEnv
 from visibility import visibility_polygon
 
@@ -161,7 +164,7 @@ class Renderer(HuntEnv):
         self._arena.blit(self._walls, (0, 0))
         if self.show_rays:
             self._draw_rays()
-            if self.threat.waypoint is not None:
+            if not isinstance(self.threat, Agent) and self.threat.waypoint is not None:
                 pygame.draw.circle(
                     self._arena, WAYPOINT_COLOR, self._point(self.threat.waypoint),
                     4 * RENDER_SCALE, RENDER_SCALE,
@@ -185,7 +188,7 @@ class Renderer(HuntEnv):
         arrow = [tip, base + agent.right * 5, base - agent.right * 5]
         if self._player_visible(agent.position):
             pygame.draw.polygon(self._arena, (225, 247, 255), [self._point(p) for p in arrow])
-        if isinstance(self.threat, Player):
+        if isinstance(self.threat, (Player, Agent)):
             player = self.threat
             direction = np.array([np.cos(player.angle), np.sin(player.angle)])
             pygame.draw.line(
