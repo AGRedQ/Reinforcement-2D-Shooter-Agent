@@ -21,14 +21,14 @@ Includes shooting threats, damage/death, threat respawns, curriculum replay,
 PPO updates, --render, and the Streamlit/Plotly dashboard with graceful Stop and
 CSV export. --no-dashboard disables the dashboard.
 
-Default checkpoint: models/mlp_ppo_random_map.pt. Training automatically resumes
+Default checkpoint: checkpoints/mlp_ppo_random_map.pt. Training automatically resumes
 it if present. --model NAME can fine-tune a compatible hunting/combat checkpoint;
-that checkpoint will be overwritten. Other trainers keep their fixed maps.
+that checkpoint will be overwritten.
 """
 
-from training import parse_args as parse_training_args
-from training import train as train_ppo
-from training import watch as watch_ppo
+from models.ppo import parse_args as parse_training_args
+from models.ppo import train as train_ppo
+from models.ppo import watch as watch_ppo
 
 DEFAULT_MODEL_NAME = "mlp_ppo_random_map.pt"
 

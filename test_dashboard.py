@@ -14,12 +14,12 @@ from urllib.request import Request, urlopen
 
 from streamlit.testing.v1 import AppTest
 
-import training
+from models import ppo
 from dashboard import MetricsDashboard
 from dashboard_app import export_csv, metric_figure, smoothed
 
 APP_PATH = Path(__file__).with_name("dashboard_app.py")
-METRICS = {**training.EPISODE_METRICS, **training.COMBAT_METRICS, **training.PPO_METRICS}
+METRICS = {**ppo.EPISODE_METRICS, **ppo.COMBAT_METRICS, **ppo.PPO_METRICS}
 
 
 def bridge_request(dashboard: MetricsDashboard, path: str = "/snapshot", method: str = "GET"):
@@ -149,7 +149,7 @@ class DashboardUITests(unittest.TestCase):
         self.assertIn("Finishing current episodes", app.info[0].value)
 
     def test_hunting_dashboard_without_combat_metrics(self):
-        self.dashboard.metrics = {**training.EPISODE_METRICS, **training.PPO_METRICS}
+        self.dashboard.metrics = {**ppo.EPISODE_METRICS, **ppo.PPO_METRICS}
         app = self.app()
         self.assertFalse(app.exception)
         self.assertEqual(len(app.tabs), 2)
@@ -192,18 +192,18 @@ class DashboardTrainingTests(unittest.TestCase):
 
         for combat, map_seeds in [(False, None), (True, None), (True, (2, 7))]:
             with self.subTest(combat=combat, map_seeds=map_seeds), tempfile.TemporaryDirectory() as directory:
-                args = training.parse_args([
+                args = ppo.parse_args([
                     "--num-envs", "2", "--max-steps", "12",
                     "--rollout-steps", "4", "--minibatch-size", "8",
                     "--hidden-size", "16", "--epochs", "1",
                 ])
                 with (
-                    patch.object(training, "MODELS_DIR", Path(directory)),
-                    patch.object(training, "MetricsDashboard", StopOnUpdateDashboard),
+                    patch.object(ppo, "CHECKPOINTS_DIR", Path(directory)),
+                    patch.object(ppo, "MetricsDashboard", StopOnUpdateDashboard),
                     patch("dashboard.webbrowser.open", return_value=True),
                 ):
-                    training.train(args, shoot_back=combat, map_seeds=map_seeds)
-                    checkpoint = training.load_checkpoint(training.resolve_model_path(args.model))
+                    ppo.train(args, shoot_back=combat, map_seeds=map_seeds)
+                    checkpoint = ppo.load_checkpoint(ppo.resolve_model_path(args.model))
                 self.assertGreater(checkpoint["updates"], 0)
                 self.assertGreaterEqual(checkpoint["episodes"], 2)
                 self.assertTrue(dashboards[-1].stop_requested)
@@ -215,7 +215,7 @@ class DashboardTrainingTests(unittest.TestCase):
 
     def test_no_dashboard_does_not_import_streamlit_or_plotly(self):
         result = subprocess.run(
-            [sys.executable, "-c", "import sys, training; assert 'streamlit' not in sys.modules; assert 'plotly' not in sys.modules"],
+            [sys.executable, "-c", "import sys; import models.ppo; assert 'streamlit' not in sys.modules; assert 'plotly' not in sys.modules"],
             cwd=Path(__file__).parent, capture_output=True, text=True, timeout=30,
         )
         self.assertEqual(result.returncode, 0, result.stderr)

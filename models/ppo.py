@@ -1,16 +1,4 @@
-"""PPO (MLP, three action heads) with curriculum learning for the hunting environment.
-
-Train:  python training.py [--model NAME] [--max-steps 1000] [--total-episodes N] [--render]
-Watch:  python training.py --watch [--model NAME] [--stage N]
-
-``--model``: empty uses ``models/mlp_ppo_currilearning.pt``. A given name is looked up in
-``models/`` (``.pt`` is added if it has no extension); training resumes from it if it
-exists, otherwise a new model is created under that name.
-
-Training automatically opens a local Streamlit/Plotly dashboard with live
-metrics, CSV export and a graceful Stop button. ``--no-dashboard`` disables it.
-Closing the browser does not interrupt training; the server exits with training.
-"""
+"""Shared PPO training and inference helpers for the random-map trainer."""
 
 from __future__ import annotations
 
@@ -27,15 +15,15 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.distributions import Categorical
 
 from dashboard import MetricsDashboard
 from entities import ACTION_DIMS, OBSERVATION_SIZE
 from environments import STAGES, Curriculum, HuntEnv
+from models.mlp import ActorCritic
 from renderer import Renderer
 
-MODELS_DIR = Path(__file__).resolve().parent / "models"
-DEFAULT_MODEL_NAME = "mlp_ppo_currilearning.pt"
+CHECKPOINTS_DIR = Path(__file__).resolve().parents[1] / "checkpoints"
+DEFAULT_MODEL_NAME = "mlp_ppo_random_map.pt"
 
 EPISODE_METRICS = {
     "stage": "Curriculum stage",
@@ -60,53 +48,6 @@ PPO_METRICS = {
     "explained_variance": "Explained variance",
     "learning_rate": "Learning rate",
 }
-
-
-# --------------------------------------------------------------------------- model
-
-
-def _layer_init(layer: nn.Linear, gain: float) -> nn.Linear:
-    nn.init.orthogonal_(layer.weight, gain)
-    nn.init.zeros_(layer.bias)
-    return layer
-
-
-class ActorCritic(nn.Module):
-    """Shared MLP trunk feeding one categorical head per action component plus a value head."""
-
-    def __init__(self, obs_size: int = OBSERVATION_SIZE, action_dims=ACTION_DIMS, hidden_size: int = 256):
-        super().__init__()
-        gain = float(np.sqrt(2.0))
-        self.trunk = nn.Sequential(
-            _layer_init(nn.Linear(obs_size, hidden_size), gain),
-            nn.Tanh(),
-            _layer_init(nn.Linear(hidden_size, hidden_size), gain),
-            nn.Tanh(),
-        )
-        self.action_heads = nn.ModuleList(_layer_init(nn.Linear(hidden_size, n), 0.01) for n in action_dims)
-        self.value_head = _layer_init(nn.Linear(hidden_size, 1), 1.0)
-
-    def _forward(self, obs: torch.Tensor) -> tuple[list[Categorical], torch.Tensor]:
-        hidden = self.trunk(obs)
-        return [Categorical(logits=head(hidden)) for head in self.action_heads], self.value_head(hidden).squeeze(-1)
-
-    def value(self, obs: torch.Tensor) -> torch.Tensor:
-        return self.value_head(self.trunk(obs)).squeeze(-1)
-
-    def act(self, obs: torch.Tensor, deterministic: bool = False):
-        dists, value = self._forward(obs)
-        if deterministic:
-            actions = torch.stack([d.probs.argmax(-1) for d in dists], dim=-1)
-        else:
-            actions = torch.stack([d.sample() for d in dists], dim=-1)
-        log_prob = sum(d.log_prob(actions[..., i]) for i, d in enumerate(dists))
-        return actions, log_prob, value
-
-    def evaluate(self, obs: torch.Tensor, actions: torch.Tensor):
-        dists, value = self._forward(obs)
-        log_prob = sum(d.log_prob(actions[..., i]) for i, d in enumerate(dists))
-        entropy = sum(d.entropy() for d in dists)
-        return log_prob, entropy, value
 
 
 # --------------------------------------------------------------------------- vectorised envs
@@ -205,7 +146,7 @@ def resolve_model_path(name: str | None) -> Path:
     path = Path(name or DEFAULT_MODEL_NAME)
     if not path.suffix:
         path = path.with_suffix(".pt")
-    return MODELS_DIR / path.name
+    return CHECKPOINTS_DIR / path.name
 
 
 def load_checkpoint(path: Path) -> dict:
@@ -506,7 +447,7 @@ def parse_args(
     default_model: str = DEFAULT_MODEL_NAME, random_maps: bool = False,
 ):
     p = argparse.ArgumentParser(description=description, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--model", default=default_model, help=f"model name in models/ (default {default_model})")
+    p.add_argument("--model", default=default_model, help=f"checkpoint name in checkpoints/ (default {default_model})")
     p.add_argument("--max-steps", type=int, default=1000, help="steps per episode")
     p.add_argument("--total-episodes", type=int, default=None, help="stop training after this many episodes")
     p.add_argument("--render", action="store_true", help="show one training environment live")
@@ -538,11 +479,3 @@ def parse_args(
 
         p.add_argument("--map-seeds", type=parse_map_seeds, default="9", help=MAP_SEEDS_HELP)
     return p.parse_args(argv)
-
-
-if __name__ == "__main__":
-    arguments = parse_args()
-    if arguments.watch:
-        watch(arguments)
-    else:
-        train(arguments)

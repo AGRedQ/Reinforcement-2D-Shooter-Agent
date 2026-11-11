@@ -203,7 +203,7 @@ def main() -> None:
         unsafe_allow_html=True,
     )
     if not os.environ.get("SHOOTER_DASHBOARD_URL") or not os.environ.get("SHOOTER_DASHBOARD_TOKEN"):
-        st.error("Start training.py or training_threat.py to launch a connected dashboard.")
+        st.error("Start training_random_map.py to launch a connected dashboard.")
         st.stop()
     live_dashboard()
 

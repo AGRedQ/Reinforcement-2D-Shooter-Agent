@@ -10,9 +10,8 @@ from unittest.mock import patch
 import numpy as np
 from gymnasium.utils.env_checker import check_env
 
-import training
+from models import ppo
 import training_random_map
-import training_threat
 from entities import Agent, Bullet, ShootingThreat, circle_overlaps_boxes
 from environments import STAGES, HuntEnv, default_map
 from map_generation import generate_map, parse_map_seeds
@@ -43,8 +42,7 @@ class MapSeedParsingTests(unittest.TestCase):
         args = training_random_map.parse_args(["--map-seeds", "[2,7]"])
         self.assertEqual(args.map_seeds, (2, 7))
         self.assertEqual(list(training_random_map.parse_args([]).map_seeds), list(range(10)))
-        self.assertNotEqual(args.model, training.parse_args([]).model)
-        self.assertNotEqual(args.model, training_threat.parse_args([]).model)
+        self.assertEqual(args.model, training_random_map.DEFAULT_MODEL_NAME)
         with (
             patch.object(training_random_map, "train_ppo") as train,
             patch.object(training_random_map, "watch_ppo") as watch,
@@ -158,7 +156,7 @@ class GeneratedMapEnvironmentTests(unittest.TestCase):
         self.assertEqual(env.map_seed, 3)
         env.agent.health = 10.0
         env.threat_bullets.append(Bullet(env.agent.position.copy(), np.array([450.0, 0.0]), 10.0, 600.0))
-        _, _, terminated, _, info, final_obs = training._step_autoreset(env, IDLE)
+        _, _, terminated, _, info, final_obs = ppo._step_autoreset(env, IDLE)
         self.assertTrue(terminated)
         self.assertIsNotNone(final_obs)
         self.assertEqual(info["episode"]["map_seed"], 3)
@@ -170,7 +168,7 @@ class GeneratedMapEnvironmentTests(unittest.TestCase):
 
 class GeneratedMapTrainingTests(unittest.TestCase):
     def test_workers_keep_combat_and_advance_maps_on_death(self):
-        envs = training.VecEnv(
+        envs = ppo.VecEnv(
             2, {"map_seeds": (2, 7), "shoot_back": True, "max_steps": 400, "replay_probability": 0.0},
             seed=9,
         )
@@ -197,7 +195,7 @@ class GeneratedMapTrainingTests(unittest.TestCase):
 
     def test_worker_and_rendered_autoresets_follow_seed_cycle(self):
         with patch.dict("os.environ", {"SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy"}):
-            envs = training.VecEnv(
+            envs = ppo.VecEnv(
                 2, {"map_seeds": (2, 7), "shoot_back": True, "max_steps": 1}, seed=9, render=True
             )
             try:
@@ -220,13 +218,13 @@ class GeneratedMapTrainingTests(unittest.TestCase):
             "--max-steps", "12", "--rollout-steps", "4", "--minibatch-size", "8",
             "--epochs", "1", "--hidden-size", "16", "--total-episodes", "4",
         ])
-        with tempfile.TemporaryDirectory() as directory, patch.object(training, "MODELS_DIR", Path(directory)):
+        with tempfile.TemporaryDirectory() as directory, patch.object(ppo, "CHECKPOINTS_DIR", Path(directory)):
             training_random_map.train(args)
-            checkpoint = training.load_checkpoint(training.resolve_model_path(args.model))
+            checkpoint = ppo.load_checkpoint(ppo.resolve_model_path(args.model))
             self.assertGreater(checkpoint["updates"], 0)
             args.total_episodes = checkpoint["episodes"] + 2
             training_random_map.train(args)
-            resumed = training.load_checkpoint(training.resolve_model_path(args.model))
+            resumed = ppo.load_checkpoint(ppo.resolve_model_path(args.model))
             self.assertGreater(resumed["updates"], checkpoint["updates"])
             self.assertGreater(resumed["global_step"], checkpoint["global_step"])
             watched_seeds = []
@@ -240,7 +238,7 @@ class GeneratedMapTrainingTests(unittest.TestCase):
             args.episodes, args.fps = 3, 0
             with (
                 patch.dict("os.environ", {"SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy"}),
-                patch.object(training, "Renderer", RecordingRenderer),
+                patch.object(ppo, "Renderer", RecordingRenderer),
             ):
                 training_random_map.watch(args)
             self.assertEqual(watched_seeds, [2, 7, 2])

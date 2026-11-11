@@ -9,8 +9,8 @@ import numpy as np
 import torch
 from gymnasium.utils.env_checker import check_env
 
-import training
-import training_threat
+from models import ppo
+import training_random_map
 from entities import OBSERVATION_SIZE, Agent, Bullet, ShootingThreat, Threat
 from environments import Curriculum, HuntEnv, MapLayout
 from renderer import MetricsDashboard, Renderer
@@ -151,27 +151,30 @@ class CombatEnvironmentTests(unittest.TestCase):
 
 
 class CombatTrainingTests(unittest.TestCase):
-    def test_default_checkpoint_is_separate_and_wrappers_enable_combat(self):
-        args = training_threat.parse_args([])
-        self.assertNotEqual(args.model, training.parse_args([]).model)
-        with patch.object(training_threat, "train_ppo") as train, patch.object(training_threat, "watch_ppo") as watch:
-            training_threat.train(args)
-            training_threat.watch(args)
-        train.assert_called_once_with(args, shoot_back=True)
-        watch.assert_called_once_with(args, shoot_back=True)
+    def test_random_map_trainer_uses_combat_checkpoint_and_mode(self):
+        args = training_random_map.parse_args([])
+        self.assertEqual(args.model, training_random_map.DEFAULT_MODEL_NAME)
+        with (
+            patch.object(training_random_map, "train_ppo") as train,
+            patch.object(training_random_map, "watch_ppo") as watch,
+        ):
+            training_random_map.train(args)
+            training_random_map.watch(args)
+        train.assert_called_once_with(args, shoot_back=True, map_seeds=args.map_seeds)
+        watch.assert_called_once_with(args, shoot_back=True, map_seeds=args.map_seeds)
 
     def test_dashboard_metrics_work_in_both_modes(self):
         env = combat_env(max_steps=1)
         episode = env.step(IDLE)[4]["episode"]
-        for metrics in [training.EPISODE_METRICS, {**training.EPISODE_METRICS, **training.COMBAT_METRICS}]:
+        for metrics in [ppo.EPISODE_METRICS, {**ppo.EPISODE_METRICS, **ppo.COMBAT_METRICS}]:
             dashboard = MetricsDashboard(metrics)
-            training.log_episode_metrics(dashboard, {"global_step": 1}, Curriculum(), deque([episode]))
+            ppo.log_episode_metrics(dashboard, {"global_step": 1}, Curriculum(), deque([episode]))
 
     def test_autoreset_on_death_preserves_terminal_observation(self):
         env = combat_env(max_steps=100)
         env.agent.health = 10.0
         env.threat_bullets.append(Bullet(np.array([120.0, 100.0]), np.array([-450.0, 0.0]), 10.0, 600.0))
-        obs, _, terminated, truncated, info, final_obs = training._step_autoreset(env, IDLE)
+        obs, _, terminated, truncated, info, final_obs = ppo._step_autoreset(env, IDLE)
         self.assertTrue(terminated)
         self.assertFalse(truncated)
         self.assertEqual(info["episode"]["deaths"], 1.0)
@@ -194,7 +197,7 @@ class CombatTrainingTests(unittest.TestCase):
                 env.close()
 
     def test_multiprocess_workers_shoot_and_autoreset_on_death(self):
-        envs = training.VecEnv(
+        envs = ppo.VecEnv(
             2, {"shoot_back": True, "max_steps": 400, "replay_probability": 0.0}, seed=7
         )
         finished = set()
@@ -217,27 +220,27 @@ class CombatTrainingTests(unittest.TestCase):
             envs.close()
 
     def test_multiprocess_training_saves_and_resumes_real_updates(self):
-        args = training_threat.parse_args([
+        args = training_random_map.parse_args([
             "--no-dashboard", "--num-envs", "2", "--max-steps", "12",
             "--rollout-steps", "4", "--minibatch-size", "8", "--hidden-size", "16",
             "--epochs", "1", "--total-episodes", "4", "--save-every", "1",
         ])
-        with tempfile.TemporaryDirectory() as directory, patch.object(training, "MODELS_DIR", Path(directory)):
-            training_threat.train(args)
-            model_path = training.resolve_model_path(args.model)
-            checkpoint = training.load_checkpoint(model_path)
+        with tempfile.TemporaryDirectory() as directory, patch.object(ppo, "CHECKPOINTS_DIR", Path(directory)):
+            training_random_map.train(args)
+            model_path = ppo.resolve_model_path(args.model)
+            checkpoint = ppo.load_checkpoint(model_path)
             self.assertGreater(checkpoint["updates"], 0)
             self.assertGreaterEqual(checkpoint["episodes"], 4)
             self.assertTrue(all(torch.isfinite(value).all() for value in checkpoint["model"].values()))
             args.total_episodes = checkpoint["episodes"] + 2
-            training_threat.train(args)
-            resumed = training.load_checkpoint(model_path)
+            training_random_map.train(args)
+            resumed = ppo.load_checkpoint(model_path)
             self.assertGreater(resumed["updates"], checkpoint["updates"])
             self.assertGreater(resumed["global_step"], checkpoint["global_step"])
             with patch.dict("os.environ", {"SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy"}):
                 args.episodes = 1
                 args.fps = 0
-                training_threat.watch(args)
+                training_random_map.watch(args)
 
 
 if __name__ == "__main__":
