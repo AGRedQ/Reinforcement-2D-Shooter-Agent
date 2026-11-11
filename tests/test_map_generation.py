@@ -43,7 +43,7 @@ class MapSeedParsingTests(unittest.TestCase):
         args = training_random_map.parse_args(["--map-seeds", "[2,7]"])
         self.assertEqual(args.map_seeds, (2, 7))
         self.assertEqual(list(training_random_map.parse_args([]).map_seeds), list(range(10)))
-        self.assertEqual(args.model, training_random_map.DEFAULT_MODEL_NAME)
+        self.assertEqual(args.model, "angular_deep_sets_ppo.pt")
         with (
             patch.object(training_random_map, "train_ppo") as train,
             patch.object(training_random_map, "watch_ppo") as watch,
