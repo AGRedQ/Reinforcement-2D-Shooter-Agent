@@ -4,7 +4,7 @@ This guide explains the current merged implementation in beginner-friendly langu
 
 The main entry point is **`training_random_map.py`**. It trains against shooting opponents on generated maps. The former `training.py` has been split into shared training code in `models/ppo.py` and network code in `models/mlp.py`.
 
-**The current models are feedforward. No LSTM, BiLSTM, attention, or stored observation history has been implemented.** Deep Sets handles multiple bullets in the current observation; it does not add memory across time.
+The standard trainer uses feedforward policies. A separate experimental entry point, **`training_bilstm_random_map.py`**, adds one past-window LSTM or BiLSTM before the decision MLP and compares it with the supplied angular Deep Sets checkpoint. Deep Sets itself handles bullets at the current timestep; temporal memory comes from the experimental recurrent layer. See the experiment subsection in section 8.
 
 ## Contents
 
@@ -54,8 +54,11 @@ There are two environment behaviors:
 | [environments.py](environments.py) | `HuntEnv`, rewards, spawning, episode statistics, and curriculum |
 | [map_generation.py](map_generation.py) | Seeded obstacle generation and map-seed argument parsing |
 | [models/mlp.py](models/mlp.py) | `ActorCritic`, `BulletEncoder`, and observation batching |
+| [models/recurrent.py](models/recurrent.py) | Past-only observation windows and the experimental residual LSTM/BiLSTM policy |
 | [models/ppo.py](models/ppo.py) | Worker environments, PPO, GAE, checkpoint handling, training, and watch helpers |
 | [training_random_map.py](training_random_map.py) | Public command-line entry point selecting combat and generated maps |
+| [training_bilstm_random_map.py](training_bilstm_random_map.py) | Matched fine-tuning, held-out-map evaluation, history ablation, and comparison reports |
+| [training_bilstm_scratch.py](training_bilstm_scratch.py) | Train BiLSTM + MLP end to end from random weights for an exact environment-step budget |
 | [renderer.py](renderer.py) | Pygame rendering, manual play, player-versus-agent controls |
 | [visibility.py](visibility.py) | Dense wall-clipped geometry for optional sight shading |
 | [render_preview.py](render_preview.py) | Reproducible headless screenshots of sight and movement |
@@ -194,7 +197,7 @@ Relative velocity is bullet velocity minus agent velocity. `N` varies, including
 
 The policy receives no absolute position, absolute aim angle, full map, explicit opponent velocity, stage number, or remaining episode time. Enemy and bullet visibility remain limited by direction, range, and walls.
 
-Previous action supplies a little recent context, but no previous observation is retained. This is a **partially observable** task: identical current inputs can correspond to different hidden situations.
+In the standard feedforward trainer, previous action supplies a little recent context, but no previous observation is retained. The recurrent experiment retains bounded observation windows. This is a **partially observable** task: identical current inputs can correspond to different hidden situations.
 
 ## 5. Actions
 
@@ -320,7 +323,45 @@ Each bullet's 4 features
 
 Pooling makes the result independent of bullet-list order. Empty sets produce a zero summary. PPO trains the bullet encoder jointly with the actor and critic.
 
-**Pooling is across bullets at one timestep, not across time.** More sensors can improve decisions without creating temporal memory. No recurrent state is passed between actions in the current implementation.
+**Pooling is across bullets at one timestep, not across time.** More sensors can improve decisions without creating temporal memory. The standard implementation passes no recurrent state between actions.
+
+### Separate LSTM/BiLSTM experiment
+
+`training_bilstm_random_map.py` leaves the standard trainer and original checkpoint intact. It warm-starts from `checkpoints/angular_deep_sets_ppo.pt`, encodes each observation's bullets with Deep Sets, then processes a window of 96-value features through **one recurrent layer**. The default BiLSTM has 48 hidden units per direction and a context of 32 observations. Both directions operate only on history ending at the current action; no future observations are provided.
+
+The final forward and backward hidden states feed a linear projection whose output is added to the current 96-value features before the original MLP. The projection starts at zero, preserving the original policy and critic exactly at initialization. The experiment trains the full network, including the bullet encoder, recurrent layer, projection, MLP, and heads. It recomputes complete windows during PPO updates so gradients reach earlier observations. Windows reset at episode boundaries, and time-limit bootstrapping uses the final observation with its original episode history.
+
+```bash
+# Two-seed pilot: equal additional transition budgets for each architecture.
+python training_bilstm_random_map.py --steps 65536 --train-seeds 0 1
+
+# Larger experiment; optional --recurrent-type lstm selects one direction.
+python training_bilstm_random_map.py --steps 131072 --train-seeds 0 1 2
+
+# Re-evaluate an existing run using its saved configuration.
+python training_bilstm_random_map.py --run-dir reports/memory-RUN --evaluate-only
+```
+
+Each seed gets a feedforward continuation control and a recurrent policy starting from identical pretrained weights, with fresh Adam optimizers and equal PPO/environment settings. Evaluation includes the frozen source, both trained policies, and the recurrent policy with only the current observation. Default evaluation uses stage 4, no replay, deterministic actions, maps 10–13, and six spawn seeds. Maps 0–9 are used for continuation training; the source checkpoint does not record its original training-map selection.
+
+The reporting definition of **combat success** is at least one kill while surviving to the episode time limit. Reports also include reward, kills, survival/deaths, damage, hit rate, per-seed results, and paired bootstrap intervals. Outputs live in a unique `reports/memory-*` directory: separate checkpoints, training CSV files, `experiment.json`, `evaluation.csv`, `comparison.json`, and `comparison.html`. `--resume` continues that run toward a larger total added-step target; repeat the original configuration and name its directory with `--run-dir`.
+
+These experimental checkpoints use a separate loader and are not supported by the standard trainer's `--model` option. A short pilot or an improvement over the frozen source alone does not establish better memory: compare against the equally trained feedforward control and the history ablation, and replicate across training seeds.
+
+### Train BiLSTM + MLP from scratch
+
+Use the dedicated scratch entry point to train without initializing from any existing checkpoint:
+
+```bash
+python -u training_bilstm_scratch.py --steps 2000000 \
+  --run-dir reports/bilstm-scratch-2m
+```
+
+This initializes the full network and optimizer from scratch, starts curriculum at stage 0, and trains all layers jointly. The default learning rate is `3e-4`, with four environments, 128-step rollouts, 128-sample minibatches, four PPO epochs, and a 32-observation window. The final rollout is shortened to stop at exactly 2,000,000 transitions across all environments. No feedforward continuation is trained by this command.
+
+The run directory contains `scratch_experiment.json`, live `status.json`, the training CSV, and `bilstm_seed_0.pt`. The checkpoint explicitly records `initialization: random` and no source checkpoint fingerprint. It is saved initially at step zero, periodically every 16 updates, and during cleanup. `--resume` loads only that run's own scratch checkpoint; it does not load the old angular policy into training. Repeat the original architecture/environment settings when resuming.
+
+After training finishes, the script loads `--compare-to` (default `checkpoints/angular_deep_sets_ppo.pt`) for evaluation only. It compares the trained policy, its history ablation, and the saved reference, producing `comparison.html`, JSON, and CSV. Pass `--skip-evaluation` to train and save only. The original checkpoint has a different training budget/history, so that final benchmark alone is not a fully matched architecture comparison.
 
 ## 9. PPO and GAE
 
@@ -556,7 +597,7 @@ The current implementation has several boundaries that matter when interpreting 
 
 | Limitation | Consequence |
 | --- | --- |
-| No observation history or recurrent state | The policy cannot explicitly remember where a hidden opponent was seen |
+| Standard policies have no observation history; experimental recurrence has a finite window | Standard policies cannot explicitly retain sightings; the experiment cannot remember beyond its window |
 | No exploration bonus or coverage objective | Finding distant or hidden opponents is rewarded only through later combat outcomes |
 | Legacy rays have angular gaps | A visible opponent can escape those sensors between rays |
 | Angular sensing still has occlusion and range limits | A region sensor does not reveal an opponent behind a wall |
@@ -566,7 +607,7 @@ The current implementation has several boundaries that matter when interpreting 
 | No dedicated batch evaluation command | Watch prints episode statistics, but systematic paired evaluation needs additional tooling |
 | Checkpoints omit RNG and environment state | Resume is not exact trajectory continuation |
 
-There is no implemented LSTM/BiLSTM experiment or measured memory-improvement result in this version.
+The LSTM/BiLSTM experiment is separate from standard training. Its run-specific comparison report contains measured results; adding the recurrent layer alone does not establish a memory or performance improvement.
 
 To assess a future memory model, keep observation features, reward rules, map selection, stage, and evaluation action mode consistent. Compare equal environment-transition budgets rather than only equal episode counts: combat deaths produce different episode lengths. Use multiple training seeds and held-out evaluation maps, and report reward, kills, deaths, damage, and detection delays.
 
@@ -596,6 +637,7 @@ The dummy drivers allow Pygame tests to run without a desktop or audio device. D
 | `test_visibility.py` | Sight geometry, occlusion, shading, and display toggles |
 | `test_dashboard.py` | Local bridge, Streamlit UI/server, CSV export, graceful stop |
 | `test_training_report.py` | CSV intervals, final partial samples, HTML, interruptions, resume reporting |
+| `test_recurrent.py` | Temporal padding, reset isolation, terminal history, bidirectional gradients, exact warm start, paired evaluation, real training/save/resume |
 
 At the merge validation preceding this guide update, the 76-test suite was exercised, with dashboard failures caused by the validation environment resolved in a focused rerun. Rendered previews were inspected as well. That validates the exercised behavior; it does not measure learning quality or memory.
 
