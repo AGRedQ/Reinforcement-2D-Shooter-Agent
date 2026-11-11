@@ -100,7 +100,10 @@ class CombatEnvironmentTests(unittest.TestCase):
         self.assertEqual(obs.shape, (OBSERVATION_SIZE,))
         self.assertEqual(info["episode"]["damage_taken"], 100.0)
         self.assertEqual(info["episode"]["deaths"], 1.0)
-        self.assertEqual(info["episode"]["threat_shots"], 10.0)
+        self.assertEqual(
+            info["episode"]["threat_shots"],
+            math.ceil(env.agent.max_health / env.threat.bullet_damage),
+        )
         self.assertAlmostEqual(total_reward, -7.0)
         self.assertAlmostEqual(info["episode"]["reward"], total_reward)
         with self.assertRaises(RuntimeError):
@@ -210,7 +213,10 @@ class CombatTrainingTests(unittest.TestCase):
                     self.assertTrue(terminated[i])
                     self.assertEqual(info["episode"]["deaths"], 1.0)
                     self.assertEqual(info["episode"]["damage_taken"], 100.0)
-                    self.assertGreaterEqual(info["episode"]["threat_shots"], 10.0)
+                    self.assertGreaterEqual(
+                        info["episode"]["threat_shots"],
+                        math.ceil(Agent().max_health / ShootingThreat().bullet_damage),
+                    )
                     self.assertIsNotNone(final_obs[i])
                     finished.add(i)
                 if len(finished) == 2:

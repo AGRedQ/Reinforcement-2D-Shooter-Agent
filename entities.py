@@ -24,6 +24,7 @@ CONE_RAY_INDICES = np.flatnonzero(np.abs(RAY_OFFSETS) <= math.radians(VISION_CON
 """Rays that additionally detect enemies (they overlap the regular wall rays)."""
 
 NUM_CONE_RAYS = len(CONE_RAY_INDICES)
+BULLET_FEATURE_SIZE = 4
 
 _DIAG = math.sqrt(0.5)
 MOVE_DIRECTIONS = np.array(
@@ -272,6 +273,38 @@ class Agent:
 
     # ------------------------------------------------------------------ sensing
 
+    def observe_bullets(self, boxes: np.ndarray, bullets: list[Bullet]) -> np.ndarray:
+        """Visible hostile projectiles as local position and relative velocity.
+
+        Visibility covers the continuous viewing cone, not just its discrete rays.
+        Velocity is bounded componentwise using the projectile's speed plus ours.
+        """
+        features = []
+        forward, right = self.forward, self.right
+        cos_half_cone = math.cos(math.radians(VISION_CONE_DEG) / 2.0)
+        for bullet in bullets:
+            if not bullet.alive:
+                continue
+            offset = bullet.position - self.position
+            distance = float(np.linalg.norm(offset))
+            if distance > RAY_LENGTH:
+                continue
+            if distance > 1e-9:
+                direction = offset / distance
+                if float(direction @ forward) < cos_half_cone - 1e-9:
+                    continue
+                if float(ray_aabb_distances(self.position, direction[None, :], boxes)[0]) <= distance:
+                    continue
+            relative_velocity = bullet.velocity - self.velocity
+            velocity_scale = max(float(np.linalg.norm(bullet.velocity)) + self.max_speed, 1e-9)
+            features.append([
+                float(offset @ forward) / RAY_LENGTH,
+                float(offset @ right) / RAY_LENGTH,
+                float(relative_velocity @ forward) / velocity_scale,
+                float(relative_velocity @ right) / velocity_scale,
+            ])
+        return np.asarray(features, dtype=np.float32).reshape(-1, BULLET_FEATURE_SIZE)
+
     def sense(self, boxes: np.ndarray, enemies: list[Threat]) -> None:
         directions = self.ray_directions()
         self.wall_distances = np.minimum(ray_aabb_distances(self.position, directions, boxes), RAY_LENGTH)
@@ -427,7 +460,7 @@ class ShootingThreat(Threat):
     color: tuple[int, int, int] = (220, 80, 180)
     fire_cooldown: float = 0.8
     bullet_speed: float = 450.0
-    bullet_damage: float = 10.0
+    bullet_damage: float = 25.0
     bullet_range: float = 600.0
     cooldown: float = 0.0
 
@@ -454,3 +487,75 @@ class ShootingThreat(Threat):
             damage=self.bullet_damage,
             max_range=self.bullet_range,
         )
+
+
+@dataclass
+class Player(ShootingThreat):
+    """Human-controlled opponent with Agent stats and shared combat mechanics."""
+
+    radius: float = Agent.radius
+    max_health: float = Agent.max_health
+    max_speed: float = Agent.max_speed
+    acceleration: float = Agent.acceleration
+    fire_cooldown: float = Agent.fire_cooldown
+    bullet_speed: float = Agent.bullet_speed
+    bullet_damage: float = Agent.bullet_damage
+    bullet_range: float = Agent.bullet_range
+    angle: float = 0.0
+    movement: np.ndarray = field(default_factory=lambda: np.zeros(2))
+    aim_position: np.ndarray = field(default_factory=lambda: np.zeros(2))
+    firing: bool = False
+
+    def reset(self, position: np.ndarray, speed: float, evade: bool) -> None:
+        super().reset(position, self.max_speed, False)
+        self.cooldown = 0.0
+        self.angle = 0.0
+        self.movement = np.zeros(2)
+        self.aim_position = self.position + np.array([1.0, 0.0])
+        self.firing = False
+
+    def set_controls(self, movement: np.ndarray, aim_position: np.ndarray, firing: bool) -> None:
+        if movement.shape != (2,) or aim_position.shape != (2,):
+            raise ValueError("Player movement and aim_position must be two-dimensional")
+        if not np.isfinite(movement).all() or not np.isfinite(aim_position).all():
+            raise ValueError("Player controls must be finite")
+        self.movement = movement / max(1.0, float(np.linalg.norm(movement)))
+        self.aim_position = aim_position.copy()
+        self.firing = firing
+
+    def update(
+        self, dt: float, boxes: np.ndarray, rng: np.random.Generator,
+        sample_position: Callable[[], np.ndarray], agent: Agent,
+    ) -> None:
+        if not self.alive:
+            return
+        target_velocity = self.movement * self.max_speed
+        self.velocity += (target_velocity - self.velocity) * min(1.0, self.acceleration * dt)
+        self.position, self.velocity = resolve_wall_collisions(
+            self.position + self.velocity * dt, self.velocity, self.radius, boxes,
+        )
+        offset = self.aim_position - self.position
+        if float(np.linalg.norm(offset)) > 1e-9:
+            self.angle = math.atan2(float(offset[1]), float(offset[0]))
+
+    def shoot(self, dt: float, boxes: np.ndarray, agent: Agent) -> Bullet | None:
+        self.cooldown = max(0.0, self.cooldown - dt)
+        if not self.alive or not agent.alive or not self.firing or self.cooldown > 1e-9:
+            return None
+        direction = np.array([math.cos(self.angle), math.sin(self.angle)])
+        self.cooldown = self.fire_cooldown
+        # Start at the body center so the muzzle cannot bypass an adjacent wall.
+        return Bullet(self.position.copy(), direction * self.bullet_speed, self.bullet_damage, self.bullet_range)
+
+    def can_see(self, position: np.ndarray, boxes: np.ndarray) -> bool:
+        offset = position - self.position
+        distance = float(np.linalg.norm(offset))
+        if distance > RAY_LENGTH:
+            return False
+        if distance <= 1e-9:
+            return True
+        direction = offset / distance
+        forward = np.array([math.cos(self.angle), math.sin(self.angle)])
+        if float(direction @ forward) < math.cos(math.radians(VISION_CONE_DEG) / 2.0) - 1e-9:
+            return False
+        return float(ray_aabb_distances(self.position, direction[None, :], boxes)[0]) > distance

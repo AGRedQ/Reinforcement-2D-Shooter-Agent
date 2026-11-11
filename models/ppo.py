@@ -19,11 +19,12 @@ import torch.nn as nn
 from dashboard import MetricsDashboard
 from entities import ACTION_DIMS, OBSERVATION_SIZE
 from environments import STAGES, Curriculum, HuntEnv
-from models.mlp import ActorCritic
+from models.mlp import ActorCritic, Observation, batch_observations, select_observations
 from renderer import Renderer
 
 CHECKPOINTS_DIR = Path(__file__).resolve().parents[1] / "checkpoints"
 DEFAULT_MODEL_NAME = "mlp_ppo_random_map.pt"
+DEEP_SETS_MODEL_NAME = "deep_sets_ppo_random_map.pt"
 
 EPISODE_METRICS = {
     "stage": "Curriculum stage",
@@ -100,7 +101,8 @@ class VecEnv:
             self.remotes.append(parent)
             self.processes.append(process)
         first_obs.extend(remote.recv() for remote in self.remotes)
-        self.observations = np.stack(first_obs)
+        self.bullet_sensing = env_kwargs.get("bullet_sensing", False)
+        self.observations = list(first_obs) if self.bullet_sensing else np.stack(first_obs)
 
     def step(self, actions: np.ndarray):
         offset = 1 if self.local_env is not None else 0
@@ -109,7 +111,7 @@ class VecEnv:
         results = [_step_autoreset(self.local_env, actions[0])] if self.local_env is not None else []
         results.extend(remote.recv() for remote in self.remotes)
         obs, rewards, terminated, truncated, infos, final_obs = zip(*results)
-        self.observations = np.stack(obs)
+        self.observations = list(obs) if self.bullet_sensing else np.stack(obs)
         return (
             self.observations,
             np.array(rewards, dtype=np.float32),
@@ -156,6 +158,9 @@ def load_checkpoint(path: Path) -> dict:
             f"{path} was trained with obs size {checkpoint['obs_size']} / actions {checkpoint['action_dims']}, "
             f"but the environment now uses {OBSERVATION_SIZE} / {ACTION_DIMS}."
         )
+    architecture = checkpoint.get("architecture", "mlp")
+    if architecture not in ("mlp", "deep_sets_v1"):
+        raise ValueError(f"{path} uses unsupported architecture {architecture!r}")
     return checkpoint
 
 
@@ -170,6 +175,7 @@ def save_checkpoint(path: Path, policy: ActorCritic, optimizer, curriculum: Curr
             "obs_size": OBSERVATION_SIZE,
             "action_dims": list(ACTION_DIMS),
             "hidden_size": hidden_size,
+            "architecture": "deep_sets_v1" if policy.bullet_sensing else "mlp",
             **progress,
         },
         tmp,
@@ -184,13 +190,13 @@ def ppo_update(policy: ActorCritic, optimizer, batch: dict, args) -> dict[str, f
     obs, actions, old_log_probs, advantages, returns, old_values = (
         batch[k] for k in ("obs", "actions", "log_probs", "advantages", "returns", "values")
     )
-    size = len(obs)
+    size = len(actions)
     stats = {k: [] for k in ("policy_loss", "value_loss", "entropy", "approx_kl", "clip_fraction")}
     for _ in range(args.epochs):
         permutation = torch.randperm(size)
         for start in range(0, size, args.minibatch_size):
             idx = permutation[start : start + args.minibatch_size]
-            log_probs, entropy, values = policy.evaluate(obs[idx], actions[idx])
+            log_probs, entropy, values = policy.evaluate(select_observations(obs, idx), actions[idx])
             log_ratio = log_probs - old_log_probs[idx]
             ratio = log_ratio.exp()
             adv = advantages[idx]
@@ -240,9 +246,17 @@ def train(args, *, shoot_back: bool = False, map_seeds: Sequence[int] | None = N
     hidden_size = args.hidden_size
 
     checkpoint = load_checkpoint(model_path) if model_path.exists() else None
+    bullet_sensing = args.bullet_sensing
     if checkpoint is not None:
         hidden_size = checkpoint["hidden_size"]
-    policy = ActorCritic(hidden_size=hidden_size)
+        checkpoint_sensing = checkpoint.get("architecture", "mlp") == "deep_sets_v1"
+        if bullet_sensing and not checkpoint_sensing:
+            raise ValueError(
+                "This is an MLP checkpoint, not a Deep Sets checkpoint. "
+                "Use --bullet-sensing with a new --model name; existing weights are not migrated."
+            )
+        bullet_sensing = checkpoint_sensing
+    policy = ActorCritic(hidden_size=hidden_size, bullet_sensing=bullet_sensing)
     optimizer = torch.optim.Adam(policy.parameters(), lr=args.lr, eps=1e-5)
     if checkpoint is not None:
         policy.load_state_dict(checkpoint["model"])
@@ -261,6 +275,7 @@ def train(args, *, shoot_back: bool = False, map_seeds: Sequence[int] | None = N
         "replay_probability": args.replay_probability,
         "shoot_back": shoot_back,
         "map_seeds": map_seeds,
+        "bullet_sensing": bullet_sensing,
     }
     envs = VecEnv(args.num_envs, env_kwargs, seed=args.seed + progress["global_step"], render=args.render)
     dashboard = None
@@ -276,7 +291,6 @@ def train(args, *, shoot_back: bool = False, map_seeds: Sequence[int] | None = N
         )
 
     n, t_max = args.num_envs, args.rollout_steps
-    buf_obs = torch.zeros(t_max, n, OBSERVATION_SIZE)
     buf_actions = torch.zeros(t_max, n, len(ACTION_DIMS), dtype=torch.long)
     buf_log_probs, buf_values, buf_rewards, buf_dones = (torch.zeros(t_max, n) for _ in range(4))
     recent = deque(maxlen=100)
@@ -284,7 +298,7 @@ def train(args, *, shoot_back: bool = False, map_seeds: Sequence[int] | None = N
     stop_reason: str | None = None
     finished_after_stop: set[int] = set()
     start_time, start_step = time.time(), progress["global_step"]
-    obs = torch.as_tensor(envs.observations)
+    obs = batch_observations(list(envs.observations))
     try:
         if dashboard is not None:
             dashboard.set_info(
@@ -293,8 +307,10 @@ def train(args, *, shoot_back: bool = False, map_seeds: Sequence[int] | None = N
             )
             dashboard.start()
         while True:
+            rollout_observations: list[Observation] = []
             rollout_complete = True
             for t in range(t_max):
+                rollout_observations.extend(envs.observations)
                 with torch.no_grad():
                     actions, log_probs, values = policy.act(obs)
                 next_obs, rewards, terminated, truncated, infos, final_obs = envs.step(actions.numpy())
@@ -302,12 +318,12 @@ def train(args, *, shoot_back: bool = False, map_seeds: Sequence[int] | None = N
                 # Time-limit truncation: the state still had a future, so bootstrap from it.
                 for i in np.flatnonzero(truncated & ~terminated):
                     with torch.no_grad():
-                        rewards[i] += args.gamma * policy.value(torch.as_tensor(final_obs[i])).item()
+                        rewards[i] += args.gamma * policy.value(batch_observations([final_obs[i]])).item()
 
-                buf_obs[t], buf_actions[t], buf_log_probs[t], buf_values[t] = obs, actions, log_probs, values
+                buf_actions[t], buf_log_probs[t], buf_values[t] = actions, log_probs, values
                 buf_rewards[t] = rewards
                 buf_dones[t] = torch.as_tensor(terminated | truncated, dtype=torch.float32)
-                obs = torch.as_tensor(next_obs)
+                obs = batch_observations(list(next_obs))
                 progress["global_step"] += n
 
                 if stop_reason is None and dashboard is not None and dashboard.stop_requested:
@@ -337,7 +353,7 @@ def train(args, *, shoot_back: bool = False, map_seeds: Sequence[int] | None = N
                 last_values = policy.value(obs)
             advantages, returns = compute_gae(buf_rewards, buf_values, buf_dones, last_values, args.gamma, args.gae_lambda)
             batch = {
-                "obs": buf_obs.reshape(-1, OBSERVATION_SIZE),
+                "obs": batch_observations(rollout_observations),
                 "actions": buf_actions.reshape(-1, len(ACTION_DIMS)),
                 "log_probs": buf_log_probs.reshape(-1),
                 "advantages": advantages.reshape(-1),
@@ -418,7 +434,10 @@ def watch(args, *, shoot_back: bool = False, map_seeds: Sequence[int] | None = N
     if not model_path.exists():
         raise FileNotFoundError(f"No model at {model_path}")
     checkpoint = load_checkpoint(model_path)
-    policy = ActorCritic(hidden_size=checkpoint["hidden_size"])
+    bullet_sensing = checkpoint.get("architecture", "mlp") == "deep_sets_v1"
+    if args.bullet_sensing and not bullet_sensing:
+        raise ValueError("--bullet-sensing requires a trained Deep Sets checkpoint")
+    policy = ActorCritic(hidden_size=checkpoint["hidden_size"], bullet_sensing=bullet_sensing)
     policy.load_state_dict(checkpoint["model"])
     policy.eval()
     stage = args.stage if args.stage is not None else checkpoint["curriculum"]["stage"]
@@ -426,6 +445,8 @@ def watch(args, *, shoot_back: bool = False, map_seeds: Sequence[int] | None = N
     env = Renderer(
         max_steps=args.max_steps, stage=stage, replay_probability=0.0,
         fps=args.fps, shoot_back=shoot_back, map_seeds=map_seeds,
+        bullet_sensing=bullet_sensing,
+        human_opponent=args.play_against, player_hacks=args.player_hacks,
     )
     for episode in range(args.episodes):
         seed = args.seed + episode if map_seeds is None else (args.seed if episode == 0 else None)
@@ -433,8 +454,8 @@ def watch(args, *, shoot_back: bool = False, map_seeds: Sequence[int] | None = N
         done = False
         while not done and env.window_open:
             with torch.no_grad():
-                action, _, _ = policy.act(torch.as_tensor(obs), deterministic=not args.stochastic)
-            obs, _, terminated, truncated, info = env.step(action.numpy())
+                action, _, _ = policy.act(batch_observations([obs]), deterministic=not args.stochastic)
+            obs, _, terminated, truncated, info = env.step(action[0].numpy())
             done = terminated or truncated
         if not env.window_open:
             break
@@ -447,7 +468,14 @@ def parse_args(
     default_model: str = DEFAULT_MODEL_NAME, random_maps: bool = False,
 ):
     p = argparse.ArgumentParser(description=description, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--model", default=default_model, help=f"checkpoint name in checkpoints/ (default {default_model})")
+    p.add_argument(
+        "--model", default=None,
+        help=f"checkpoint name (default {default_model}, or {DEEP_SETS_MODEL_NAME} with --bullet-sensing)",
+    )
+    p.add_argument(
+        "--bullet-sensing", action="store_true",
+        help="train a Deep Sets policy using visible hostile bullets; saved policies auto-select sensing",
+    )
     p.add_argument("--max-steps", type=int, default=1000, help="steps per episode")
     p.add_argument("--total-episodes", type=int, default=None, help="stop training after this many episodes")
     p.add_argument("--render", action="store_true", help="show one training environment live")
@@ -470,6 +498,8 @@ def parse_args(
     p.add_argument("--save-every", type=int, default=25, help="PPO updates between checkpoints")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--watch", action="store_true", help="watch a saved model instead of training")
+    p.add_argument("--play-against", action="store_true", help="control a Player threat against the saved agent")
+    p.add_argument("--player-hacks", action="store_true", help="start --play-against with wallhack and agent rays")
     p.add_argument("--stage", type=int, default=None, choices=range(len(STAGES)), help="stage for --watch")
     p.add_argument("--episodes", type=int, default=5, help="episodes for --watch")
     p.add_argument("--fps", type=int, default=30, help="frame rate for --watch")
@@ -478,4 +508,9 @@ def parse_args(
         from map_generation import MAP_SEEDS_HELP, parse_map_seeds
 
         p.add_argument("--map-seeds", type=parse_map_seeds, default="9", help=MAP_SEEDS_HELP)
-    return p.parse_args(argv)
+    args = p.parse_args(argv)
+    if args.player_hacks and not args.play_against:
+        p.error("--player-hacks requires --play-against")
+    if args.model is None:
+        args.model = DEEP_SETS_MODEL_NAME if args.bullet_sensing else default_model
+    return args

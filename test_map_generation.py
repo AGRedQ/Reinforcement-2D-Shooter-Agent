@@ -1,6 +1,7 @@
 import argparse
 import contextlib
 import io
+import math
 import tempfile
 import unittest
 from collections import deque
@@ -184,7 +185,10 @@ class GeneratedMapTrainingTests(unittest.TestCase):
                     self.assertEqual(episode["map_seed"], 2)
                     self.assertEqual(episode["deaths"], 1.0)
                     self.assertEqual(episode["damage_taken"], 100.0)
-                    self.assertGreaterEqual(episode["threat_shots"], 10)
+                    self.assertGreaterEqual(
+                        episode["threat_shots"],
+                        math.ceil(Agent().max_health / ShootingThreat().bullet_damage),
+                    )
                     self.assertIsNotNone(final_obs[index])
                     finished.add(index)
                 if len(finished) == 2:

@@ -12,6 +12,7 @@ import numpy as np
 
 from entities import (
     ACTION_DIMS,
+    BULLET_FEATURE_SIZE,
     OBSERVATION_SIZE,
     Agent,
     Bullet,
@@ -135,6 +136,8 @@ class HuntEnv(gym.Env):
     reset seed restarts the map cycle as well as the spawn RNG; threat respawns
     do not change maps. Without ``map_seeds``, the fixed/custom layout is preserved.
     Observation: egocentric vector of size ``OBSERVATION_SIZE`` (see ``entities.Agent.observation``).
+    ``bullet_sensing=True`` instead returns a dict with that ``state`` vector and
+    a variable-length ``bullets`` array (N, 4), limited by cone, range and walls.
     Action: ``MultiDiscrete([9, 3, 2])`` = (move, aim, fire).
     """
 
@@ -150,6 +153,7 @@ class HuntEnv(gym.Env):
         replay_probability: float = 0.2,
         shoot_back: bool = False,
         map_seeds: Sequence[int] | None = None,
+        bullet_sensing: bool = False,
     ):
         super().__init__()
         if map_seeds is not None:
@@ -171,9 +175,18 @@ class HuntEnv(gym.Env):
         self.dt = dt
         self.replay_probability = replay_probability
         self.shoot_back = shoot_back
+        self.bullet_sensing = bullet_sensing
         self.set_stage(stage)
 
         self.observation_space = gym.spaces.Box(-1.0, 1.0, shape=(OBSERVATION_SIZE,), dtype=np.float32)
+        if bullet_sensing:
+            self.observation_space = gym.spaces.Dict({
+                "state": self.observation_space,
+                "bullets": gym.spaces.Sequence(
+                    gym.spaces.Box(-1.0, 1.0, shape=(BULLET_FEATURE_SIZE,), dtype=np.float32),
+                    stack=True,
+                ),
+            })
         self.action_space = gym.spaces.MultiDiscrete(ACTION_DIMS)
 
         self.agent = Agent(agent_id=0)
@@ -248,7 +261,16 @@ class HuntEnv(gym.Env):
         self._spawn_threat(threat_position)
         self.agent.sense(self.layout.boxes, [self.threat])
         self._update_detection()
-        return self.agent.observation(), ({"map_seed": self.map_seed} if self.map_seed is not None else {})
+        return self._observation(), ({"map_seed": self.map_seed} if self.map_seed is not None else {})
+
+    def _observation(self) -> np.ndarray | dict[str, np.ndarray]:
+        state = self.agent.observation()
+        if not self.bullet_sensing:
+            return state
+        return {
+            "state": state,
+            "bullets": self.agent.observe_bullets(self.layout.boxes, self.threat_bullets),
+        }
 
     def step(self, action):
         if self.steps >= self.max_steps or (self.shoot_back and not self.agent.alive):
@@ -314,7 +336,7 @@ class HuntEnv(gym.Env):
             stats["detect_steps"] = float(np.mean(delays))
             stats["length"] = float(self.steps)
             info["episode"] = dict(stats)
-        return self.agent.observation(), float(reward), terminated, truncated, info
+        return self._observation(), float(reward), terminated, truncated, info
 
     def _update_detection(self) -> None:
         if not self._threat_detected and self.agent.enemy_detected.any():

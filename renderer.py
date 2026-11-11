@@ -24,7 +24,7 @@ import numpy as np
 import pygame
 
 from dashboard import MetricsDashboard
-from entities import CONE_RAY_INDICES, MOVE_DIRECTIONS
+from entities import CONE_RAY_INDICES, MOVE_DIRECTIONS, Player
 from environments import STAGES, HuntEnv
 
 BACKGROUND = (20, 27, 35)
@@ -50,13 +50,22 @@ class Renderer(HuntEnv):
 
     metadata = {"render_modes": ["human"], "render_fps": 30}
 
-    def __init__(self, *args, fps: int = 30, render_every: int = 1, show_rays: bool = True, **kwargs):
+    def __init__(
+        self, *args, fps: int = 30, render_every: int = 1, show_rays: bool = True,
+        human_opponent: bool = False, player_hacks: bool = False, **kwargs,
+    ):
+        if human_opponent:
+            kwargs["shoot_back"] = True
         super().__init__(*args, **kwargs)
+        self.human_opponent = human_opponent
+        self.player_hacks = player_hacks
+        if human_opponent:
+            self.threat = Player()
         self.render_mode = "human"
         self.fps = fps
         self.render_every = max(1, render_every)
-        self.show_rays = show_rays
-        self.show_trails = True
+        self.show_rays = player_hacks if human_opponent else show_rays
+        self.show_trails = not human_opponent
         self.cap_fps = fps > 0
         self.window_open = True
         self._screen: pygame.Surface | None = None
@@ -81,6 +90,17 @@ class Renderer(HuntEnv):
         return result
 
     def step(self, action):
+        if isinstance(self.threat, Player) and self._screen is not None and self.window_open:
+            keys = pygame.key.get_pressed()
+            movement = np.array([
+                int(keys[pygame.K_d]) - int(keys[pygame.K_a]),
+                int(keys[pygame.K_s]) - int(keys[pygame.K_w]),
+            ], dtype=np.float64)
+            mouse = np.asarray(pygame.mouse.get_pos(), dtype=np.float64)
+            self.threat.set_controls(
+                movement, mouse,
+                bool(pygame.mouse.get_pressed()[0]) and 0 <= mouse[1] < self.layout.height,
+            )
         result = super().step(action)
         for trail, actor in zip(self._trails, (self.agent, self.threat)):
             if trail and np.linalg.norm(actor.position - trail[-1]) > 80:
@@ -109,11 +129,14 @@ class Renderer(HuntEnv):
             if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
                 self.close()
                 return
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_r:
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_h and self.human_opponent:
+                self.player_hacks = not self.player_hacks
+                self.show_rays = self.player_hacks
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_r and not self.human_opponent:
                 self.show_rays = not self.show_rays
             if event.type == pygame.KEYDOWN and event.key == pygame.K_f:
                 self.cap_fps = not self.cap_fps
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_t:
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_t and not self.human_opponent:
                 self.show_trails = not self.show_trails
 
         screen = self._screen
@@ -129,26 +152,43 @@ class Renderer(HuntEnv):
                     4 * RENDER_SCALE, RENDER_SCALE,
                 )
         for bullet in self.bullets:
-            self._draw_bullet(bullet.position, bullet.velocity, BULLET_COLOR)
+            if self._player_visible(bullet.position):
+                self._draw_bullet(bullet.position, bullet.velocity, BULLET_COLOR)
         for bullet in self.threat_bullets:
-            self._draw_bullet(bullet.position, bullet.velocity, THREAT_BULLET_COLOR)
+            if self._player_visible(bullet.position):
+                self._draw_bullet(bullet.position, bullet.velocity, THREAT_BULLET_COLOR)
         self._draw_body(
             self.threat.position, self.threat.radius, self.threat.color,
             self.threat.health / self.threat.max_health,
-            muted=not bool(self.agent.enemy_detected.any()),
+            muted=not self.human_opponent and not bool(self.agent.enemy_detected.any()),
         )
         agent = self.agent
-        self._draw_body(agent.position, agent.radius, agent.color, agent.health / agent.max_health)
+        if self._player_visible(agent.position):
+            self._draw_body(agent.position, agent.radius, agent.color, agent.health / agent.max_health)
         tip = agent.position + agent.forward * (agent.radius + 12)
         base = agent.position + agent.forward * 8
         arrow = [tip, base + agent.right * 5, base - agent.right * 5]
-        pygame.draw.polygon(self._arena, (225, 247, 255), [self._point(p) for p in arrow])
+        if self._player_visible(agent.position):
+            pygame.draw.polygon(self._arena, (225, 247, 255), [self._point(p) for p in arrow])
+        if isinstance(self.threat, Player):
+            player = self.threat
+            direction = np.array([np.cos(player.angle), np.sin(player.angle)])
+            pygame.draw.line(
+                self._arena, THREAT_BULLET_COLOR, self._point(player.position),
+                self._point(player.position + direction * (player.radius + 16)), 3 * RENDER_SCALE,
+            )
         arena_rect = (0, 0, int(self.layout.width), int(self.layout.height))
         pygame.transform.smoothscale(self._arena, arena_rect[2:], screen.subsurface(arena_rect))
         self._draw_hud()
 
         pygame.display.flip()
         self._clock.tick((self.fps or self.metadata["render_fps"]) if self.cap_fps else 0)
+
+    def _player_visible(self, position: np.ndarray) -> bool:
+        return (
+            not isinstance(self.threat, Player) or self.player_hacks
+            or self.threat.can_see(position, self.layout.boxes)
+        )
 
     def close(self) -> None:
         if self._screen is not None:
@@ -221,6 +261,9 @@ class Renderer(HuntEnv):
             pygame.draw.rect(self._arena, (70, 101, 91) if muted else (114, 223, 173), fill, border_radius=4)
 
     def _draw_hud(self) -> None:
+        if self.human_opponent:
+            self._draw_player_hud()
+            return
         y = int(self.layout.height)
         screen = self._screen
         pygame.draw.rect(screen, (13, 19, 27), pygame.Rect(0, y, self.layout.width, HUD_HEIGHT))
@@ -253,6 +296,21 @@ class Renderer(HuntEnv):
             self._small_font.render("Discrete sensor rays only / undetected targets are dimmed for the observer", True, (122, 145, 161)),
             (18, y + 108),
         )
+
+    def _draw_player_hud(self) -> None:
+        y = int(self.layout.height)
+        pygame.draw.rect(self._screen, (13, 19, 27), pygame.Rect(0, y, self.layout.width, HUD_HEIGHT))
+        agent_hp = f"{self.agent.health:.0f}" if self._player_visible(self.agent.position) else "?"
+        lines = [
+            "PLAYER vs SAVED AGENT",
+            f"YOUR HP {self.threat.health:.0f}   AGENT HP {agent_hp}   "
+            f"PLAYER DEATHS {int(self.episode_stats.get('kills', 0))}   STEP {self.steps}/{self.max_steps}",
+            f"WASD move   MOUSE aim   LEFT CLICK fire   H hacks {'ON' if self.player_hacks else 'OFF'}",
+            "H reveals the agent and its rays; normal view uses your frontal cone and walls.",
+            "Player deaths respawn you; agent death or the time limit starts a new round. ESC quits.",
+        ]
+        for i, text in enumerate(lines):
+            self._screen.blit(self._small_font.render(text, True, TEXT_COLOR), (18, y + 10 + i * 23))
 
 
 def human_action() -> np.ndarray:
