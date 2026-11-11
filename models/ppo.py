@@ -17,10 +17,11 @@ import torch
 import torch.nn as nn
 
 from dashboard import MetricsDashboard
-from entities import ACTION_DIMS, OBSERVATION_SIZE
+from entities import ACTION_DIMS, ANGULAR_OBSERVATION_SIZE, OBSERVATION_SIZE
 from environments import STAGES, Curriculum, HuntEnv
 from models.mlp import ActorCritic, Observation, batch_observations, select_observations
 from renderer import Renderer
+from training_report import REPORTS_DIR, TrainingReport
 
 CHECKPOINTS_DIR = Path(__file__).resolve().parents[1] / "checkpoints"
 DEFAULT_MODEL_NAME = "mlp_ppo_random_map.pt"
@@ -153,10 +154,14 @@ def resolve_model_path(name: str | None) -> Path:
 
 def load_checkpoint(path: Path) -> dict:
     checkpoint = torch.load(path, map_location="cpu", weights_only=False)
-    if checkpoint["obs_size"] != OBSERVATION_SIZE or tuple(checkpoint["action_dims"]) != ACTION_DIMS:
+    sensing = checkpoint.get("enemy_sensing", "rays_v1")
+    if sensing not in ("rays_v1", "angular_regions_v1"):
+        raise ValueError(f"{path} uses unsupported enemy sensing {sensing!r}")
+    expected_size = ANGULAR_OBSERVATION_SIZE if sensing == "angular_regions_v1" else OBSERVATION_SIZE
+    if checkpoint["obs_size"] != expected_size or tuple(checkpoint["action_dims"]) != ACTION_DIMS:
         raise ValueError(
             f"{path} was trained with obs size {checkpoint['obs_size']} / actions {checkpoint['action_dims']}, "
-            f"but the environment now uses {OBSERVATION_SIZE} / {ACTION_DIMS}."
+            f"but {sensing} requires {expected_size} / {ACTION_DIMS}."
         )
     architecture = checkpoint.get("architecture", "mlp")
     if architecture not in ("mlp", "deep_sets_v1"):
@@ -172,7 +177,8 @@ def save_checkpoint(path: Path, policy: ActorCritic, optimizer, curriculum: Curr
             "model": policy.state_dict(),
             "optimizer": optimizer.state_dict(),
             "curriculum": curriculum.state_dict(),
-            "obs_size": OBSERVATION_SIZE,
+            "obs_size": policy.obs_size,
+            "enemy_sensing": "angular_regions_v1" if policy.angular_regions else "rays_v1",
             "action_dims": list(ACTION_DIMS),
             "hidden_size": hidden_size,
             "architecture": "deep_sets_v1" if policy.bullet_sensing else "mlp",
@@ -247,6 +253,7 @@ def train(args, *, shoot_back: bool = False, map_seeds: Sequence[int] | None = N
 
     checkpoint = load_checkpoint(model_path) if model_path.exists() else None
     bullet_sensing = args.bullet_sensing
+    angular_regions = args.angular_regions
     if checkpoint is not None:
         hidden_size = checkpoint["hidden_size"]
         checkpoint_sensing = checkpoint.get("architecture", "mlp") == "deep_sets_v1"
@@ -256,7 +263,14 @@ def train(args, *, shoot_back: bool = False, map_seeds: Sequence[int] | None = N
                 "Use --bullet-sensing with a new --model name; existing weights are not migrated."
             )
         bullet_sensing = checkpoint_sensing
-    policy = ActorCritic(hidden_size=hidden_size, bullet_sensing=bullet_sensing)
+        checkpoint_regions = checkpoint.get("enemy_sensing", "rays_v1") == "angular_regions_v1"
+        if angular_regions and not checkpoint_regions:
+            raise ValueError(
+                "This checkpoint uses legacy enemy rays. Use --angular-regions with a new --model name; "
+                "existing weights are not migrated."
+            )
+        angular_regions = checkpoint_regions
+    policy = ActorCritic(hidden_size=hidden_size, bullet_sensing=bullet_sensing, angular_regions=angular_regions)
     optimizer = torch.optim.Adam(policy.parameters(), lr=args.lr, eps=1e-5)
     if checkpoint is not None:
         policy.load_state_dict(checkpoint["model"])
@@ -276,6 +290,7 @@ def train(args, *, shoot_back: bool = False, map_seeds: Sequence[int] | None = N
         "shoot_back": shoot_back,
         "map_seeds": map_seeds,
         "bullet_sensing": bullet_sensing,
+        "angular_regions": angular_regions,
     }
     envs = VecEnv(args.num_envs, env_kwargs, seed=args.seed + progress["global_step"], render=args.render)
     dashboard = None
@@ -299,7 +314,16 @@ def train(args, *, shoot_back: bool = False, map_seeds: Sequence[int] | None = N
     finished_after_stop: set[int] = set()
     start_time, start_step = time.time(), progress["global_step"]
     obs = batch_observations(list(envs.observations))
+    report = None
     try:
+        report = TrainingReport(
+            args.report_dir, model_path,
+            {**EPISODE_METRICS, **(COMBAT_METRICS if shoot_back else {}), **PPO_METRICS},
+            {**vars(args), "shoot_back": shoot_back, "map_seeds": map_seeds,
+             "bullet_sensing": bullet_sensing, "angular_regions": angular_regions,
+             "hidden_size": hidden_size},
+            progress,
+        )
         if dashboard is not None:
             dashboard.set_info(
                 f"model     {model_path.name}\nsteps     {progress['global_step']:,}\nepisodes  {progress['episodes']:,}\n"
@@ -336,6 +360,9 @@ def train(args, *, shoot_back: bool = False, map_seeds: Sequence[int] | None = N
                     if curriculum.record(episode):
                         envs.set_stage(curriculum.stage)
                         print(f"Promoted to stage {curriculum.stage} at episode {progress['episodes']}")
+                    report.record_episode(
+                        progress, episode_metrics(curriculum, recent, combat=shoot_back)
+                    )
                     if stop_reason is not None:
                         finished_after_stop.add(i)
                 if ended:
@@ -362,6 +389,7 @@ def train(args, *, shoot_back: bool = False, map_seeds: Sequence[int] | None = N
             }
             ppo_stats = ppo_update(policy, optimizer, batch, args)
             progress["updates"] += 1
+            report.ppo = ppo_stats
 
             sps = (progress["global_step"] - start_step) / max(time.time() - start_time, 1e-9)
             if dashboard is None and progress["updates"] % 10 == 0 and recent:
@@ -391,10 +419,18 @@ def train(args, *, shoot_back: bool = False, map_seeds: Sequence[int] | None = N
     except KeyboardInterrupt:
         stop_reason = "keyboard interrupt"
     finally:
-        save_checkpoint(model_path, policy, optimizer, curriculum, progress, hidden_size)
-        envs.close()
-        if dashboard is not None:
-            dashboard.close()
+        try:
+            save_checkpoint(model_path, policy, optimizer, curriculum, progress, hidden_size)
+        finally:
+            try:
+                if report is not None:
+                    report.finish(progress, stop_reason or "training error")
+            finally:
+                try:
+                    envs.close()
+                finally:
+                    if dashboard is not None:
+                        dashboard.close()
     print(
         f"Training stopped ({stop_reason}). Saved {model_path} at step {progress['global_step']:,}, "
         f"episode {progress['episodes']:,}, stage {curriculum.stage}."
@@ -404,14 +440,19 @@ def train(args, *, shoot_back: bool = False, map_seeds: Sequence[int] | None = N
 def log_episode_metrics(dashboard: MetricsDashboard | None, progress: dict, curriculum: Curriculum, recent: deque) -> None:
     if dashboard is None:
         return
+    dashboard.log(
+        progress["global_step"],
+        **episode_metrics(curriculum, recent, combat="death_rate" in dashboard.metrics),
+    )
 
+
+def episode_metrics(curriculum: Curriculum, recent: deque, *, combat: bool) -> dict[str, float]:
     def mean(key: str) -> float:
         return float(np.mean([e[key] for e in recent]))
 
     shots = sum(e["shots"] for e in recent)
-    dashboard.log(
-        progress["global_step"],
-        stage=curriculum.stage,
+    return dict(
+        stage=float(curriculum.stage),
         mean_reward=mean("reward"),
         mean_kills=mean("kills"),
         mean_shots=mean("shots"),
@@ -421,7 +462,7 @@ def log_episode_metrics(dashboard: MetricsDashboard | None, progress: dict, curr
         mean_detect_steps=mean("detect_steps"),
         **(
             {"mean_damage_taken": mean("damage_taken"), "death_rate": mean("deaths")}
-            if "death_rate" in dashboard.metrics else {}
+            if combat else {}
         ),
     )
 
@@ -435,9 +476,12 @@ def watch(args, *, shoot_back: bool = False, map_seeds: Sequence[int] | None = N
         raise FileNotFoundError(f"No model at {model_path}")
     checkpoint = load_checkpoint(model_path)
     bullet_sensing = checkpoint.get("architecture", "mlp") == "deep_sets_v1"
+    angular_regions = checkpoint.get("enemy_sensing", "rays_v1") == "angular_regions_v1"
+    if args.angular_regions and not angular_regions:
+        raise ValueError("--angular-regions requires an angular-region checkpoint; legacy checkpoints retain rays")
     if args.bullet_sensing and not bullet_sensing:
         raise ValueError("--bullet-sensing requires a trained Deep Sets checkpoint")
-    policy = ActorCritic(hidden_size=checkpoint["hidden_size"], bullet_sensing=bullet_sensing)
+    policy = ActorCritic(hidden_size=checkpoint["hidden_size"], bullet_sensing=bullet_sensing, angular_regions=angular_regions)
     policy.load_state_dict(checkpoint["model"])
     policy.eval()
     stage = args.stage if args.stage is not None else checkpoint["curriculum"]["stage"]
@@ -446,6 +490,7 @@ def watch(args, *, shoot_back: bool = False, map_seeds: Sequence[int] | None = N
         max_steps=args.max_steps, stage=stage, replay_probability=0.0,
         fps=args.fps, shoot_back=shoot_back, map_seeds=map_seeds,
         bullet_sensing=bullet_sensing,
+        angular_regions=angular_regions,
         human_opponent=args.play_against, player_hacks=args.player_hacks,
     )
     for episode in range(args.episodes):
@@ -476,10 +521,18 @@ def parse_args(
         "--bullet-sensing", action="store_true",
         help="train a Deep Sets policy using visible hostile bullets; saved policies auto-select sensing",
     )
+    p.add_argument(
+        "--angular-regions", action="store_true",
+        help="use six continuous frontal enemy regions plus precise center ray; requires a new checkpoint",
+    )
     p.add_argument("--max-steps", type=int, default=1000, help="steps per episode")
     p.add_argument("--total-episodes", type=int, default=None, help="stop training after this many episodes")
     p.add_argument("--render", action="store_true", help="show one training environment live")
     p.add_argument("--no-dashboard", action="store_true", help="train without the Streamlit browser dashboard")
+    p.add_argument(
+        "--report-dir", type=Path, default=REPORTS_DIR,
+        help="parent folder for per-run CSV metrics (every 10 episodes) and final offline HTML reports",
+    )
     p.add_argument("--num-envs", type=int, default=8)
     p.add_argument("--rollout-steps", type=int, default=256, help="steps per environment per PPO update")
     p.add_argument("--lr", type=float, default=3e-4)
@@ -512,5 +565,8 @@ def parse_args(
     if args.player_hacks and not args.play_against:
         p.error("--player-hacks requires --play-against")
     if args.model is None:
-        args.model = DEEP_SETS_MODEL_NAME if args.bullet_sensing else default_model
+        if args.angular_regions:
+            args.model = "angular_deep_sets_ppo.pt" if args.bullet_sensing else "angular_mlp_ppo.pt"
+        else:
+            args.model = DEEP_SETS_MODEL_NAME if args.bullet_sensing else default_model
     return args

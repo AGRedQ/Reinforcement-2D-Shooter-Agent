@@ -25,6 +25,8 @@ CONE_RAY_INDICES = np.flatnonzero(np.abs(RAY_OFFSETS) <= math.radians(VISION_CON
 
 NUM_CONE_RAYS = len(CONE_RAY_INDICES)
 BULLET_FEATURE_SIZE = 4
+ENEMY_REGION_EDGES = np.radians([-30.0, -15.0, -5.0, 0.0, 5.0, 15.0, 30.0])
+NUM_ENEMY_REGIONS = len(ENEMY_REGION_EDGES) - 1
 
 _DIAG = math.sqrt(0.5)
 MOVE_DIRECTIONS = np.array(
@@ -50,6 +52,8 @@ _ACTION_ONE_HOT_OFFSETS = np.cumsum((0,) + ACTION_DIMS[:-1])
 
 OBSERVATION_SIZE = NUM_RAYS + 2 * NUM_CONE_RAYS + 2 + 1 + 1 + sum(ACTION_DIMS)
 """Wall rays, enemy (flag, distance) per cone ray, local velocity, cooldown, health, previous action."""
+ANGULAR_OBSERVATION_SIZE = OBSERVATION_SIZE - 2 * NUM_CONE_RAYS + 2 * NUM_ENEMY_REGIONS + 2
+"""Six region flags/distances plus a separate center-ray flag/distance."""
 
 
 # --------------------------------------------------------------------------- geometry
@@ -185,6 +189,7 @@ class Bullet:
 @dataclass
 class Agent:
     agent_id: int = 0
+    angular_regions: bool = False
     color: tuple[int, int, int] = (80, 160, 255)
     radius: float = 14.0
     max_speed: float = 220.0
@@ -208,6 +213,9 @@ class Agent:
     wall_distances: np.ndarray = field(default_factory=lambda: np.full(NUM_RAYS, RAY_LENGTH))
     enemy_detected: np.ndarray = field(default_factory=lambda: np.zeros(NUM_CONE_RAYS, dtype=bool))
     enemy_distances: np.ndarray = field(default_factory=lambda: np.full(NUM_CONE_RAYS, RAY_LENGTH))
+    center_detected: bool = False
+    center_distance: float = RAY_LENGTH
+    region_points: np.ndarray = field(default_factory=lambda: np.zeros((NUM_ENEMY_REGIONS, 2)))
 
     def reset(self, position: np.ndarray, angle: float) -> None:
         self.position = np.asarray(position, dtype=np.float64).copy()
@@ -308,6 +316,9 @@ class Agent:
     def sense(self, boxes: np.ndarray, enemies: list[Threat]) -> None:
         directions = self.ray_directions()
         self.wall_distances = np.minimum(ray_aabb_distances(self.position, directions, boxes), RAY_LENGTH)
+        if self.angular_regions:
+            self._sense_regions(boxes, enemies)
+            return
 
         cone_dirs = directions[CONE_RAY_INDICES]
         enemy_t = np.full(NUM_CONE_RAYS, np.inf)
@@ -317,6 +328,48 @@ class Agent:
         # Enemies are only visible if nothing (wall) blocks the line of sight.
         self.enemy_detected = (enemy_t < self.wall_distances[CONE_RAY_INDICES]) & (enemy_t < RAY_LENGTH)
         self.enemy_distances = np.where(self.enemy_detected, enemy_t, RAY_LENGTH)
+
+    def _sense_regions(self, boxes: np.ndarray, enemies: list[Threat]) -> None:
+        self.enemy_detected = np.zeros(NUM_ENEMY_REGIONS, dtype=bool)
+        self.enemy_distances = np.full(NUM_ENEMY_REGIONS, RAY_LENGTH)
+        self.region_points = np.zeros((NUM_ENEMY_REGIONS, 2))
+        self.center_detected, self.center_distance = False, RAY_LENGTH
+        # Wall silhouettes change at corners. Partition there and at target
+        # tangents, rather than sampling a fixed set of rays with blind gaps.
+        corners = boxes[:, [0, 1, 2, 1, 2, 3, 0, 3]].reshape(-1, 2) - self.position
+        corner_angles = (np.arctan2(corners[:, 1], corners[:, 0]) - self.angle + np.pi) % (2 * np.pi) - np.pi
+        for enemy in enemies:
+            if not enemy.alive:
+                continue
+            offset = enemy.position - self.position
+            distance = float(np.linalg.norm(offset))
+            if distance - enemy.radius >= RAY_LENGTH:
+                continue
+            bearing = (math.atan2(float(offset[1]), float(offset[0])) - self.angle + math.pi) % (2 * math.pi) - math.pi
+            half_width = math.asin(min(1.0, enemy.radius / max(distance, 1e-12)))
+            center_t = float(ray_circle_distances(self.position, self.forward[None, :], enemy.position, enemy.radius)[0])
+            if center_t < min(self.wall_distances[0], self.center_distance):
+                self.center_detected, self.center_distance = True, center_t
+            for i, (left, right) in enumerate(zip(ENEMY_REGION_EDGES[:-1], ENEMY_REGION_EDGES[1:])):
+                lo, hi = max(left, bearing - half_width), min(right, bearing + half_width)
+                if distance <= enemy.radius:
+                    lo, hi = left, right
+                if lo > hi:
+                    continue
+                cuts = np.unique(np.concatenate(([lo, hi], corner_angles[(corner_angles > lo) & (corner_angles < hi)])))
+                angles = np.concatenate((cuts, (cuts[:-1] + cuts[1:]) / 2, [np.clip(bearing, lo, hi)]))
+                # Check immediately beside occluding corners for nearest visible surfaces.
+                angles = np.clip(np.concatenate((angles, cuts - 1e-8, cuts + 1e-8)), lo, hi)
+                world_angles = angles + self.angle
+                rays = np.column_stack((np.cos(world_angles), np.sin(world_angles)))
+                target_t = ray_circle_distances(self.position, rays, enemy.position, enemy.radius)
+                wall_t = ray_aabb_distances(self.position, rays, boxes)
+                visible_t = np.where((target_t < wall_t) & (target_t < RAY_LENGTH), target_t, np.inf)
+                nearest = int(np.argmin(visible_t))
+                if visible_t[nearest] < self.enemy_distances[i]:
+                    self.enemy_detected[i] = True
+                    self.enemy_distances[i] = visible_t[nearest]
+                    self.region_points[i] = self.position + rays[nearest] * visible_t[nearest]
 
     def observation(self) -> np.ndarray:
         """Egocentric observation built from the latest :meth:`sense` call."""
@@ -328,6 +381,7 @@ class Agent:
                 self.wall_distances / RAY_LENGTH,
                 self.enemy_detected.astype(np.float64),
                 self.enemy_distances / RAY_LENGTH,
+                *([[float(self.center_detected), self.center_distance / RAY_LENGTH]] if self.angular_regions else []),
                 np.clip(local_velocity, -1.0, 1.0),
                 [self.cooldown / self.fire_cooldown, self.health / self.max_health],
                 previous_action,

@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 from torch.distributions import Categorical
 
-from entities import ACTION_DIMS, BULLET_FEATURE_SIZE, OBSERVATION_SIZE
+from entities import ACTION_DIMS, ANGULAR_OBSERVATION_SIZE, BULLET_FEATURE_SIZE, OBSERVATION_SIZE
 
 Observation = np.ndarray | dict[str, np.ndarray]
 TensorObservation = torch.Tensor | dict[str, torch.Tensor]
@@ -82,13 +82,16 @@ class ActorCritic(nn.Module):
     def __init__(
         self, obs_size: int = OBSERVATION_SIZE, action_dims=ACTION_DIMS,
         hidden_size: int = 256, bullet_sensing: bool = False,
+        angular_regions: bool = False,
     ):
         super().__init__()
         self.bullet_sensing = bullet_sensing
+        self.angular_regions = angular_regions
+        self.obs_size = ANGULAR_OBSERVATION_SIZE if angular_regions else obs_size
         self.bullet_encoder = BulletEncoder() if bullet_sensing else None
         gain = float(np.sqrt(2.0))
         self.trunk = nn.Sequential(
-            _layer_init(nn.Linear(obs_size + (32 if bullet_sensing else 0), hidden_size), gain),
+            _layer_init(nn.Linear(self.obs_size + (32 if bullet_sensing else 0), hidden_size), gain),
             nn.Tanh(),
             _layer_init(nn.Linear(hidden_size, hidden_size), gain),
             nn.Tanh(),

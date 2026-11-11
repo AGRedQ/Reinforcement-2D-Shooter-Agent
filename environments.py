@@ -12,6 +12,7 @@ import numpy as np
 
 from entities import (
     ACTION_DIMS,
+    ANGULAR_OBSERVATION_SIZE,
     BULLET_FEATURE_SIZE,
     OBSERVATION_SIZE,
     Agent,
@@ -138,6 +139,8 @@ class HuntEnv(gym.Env):
     Observation: egocentric vector of size ``OBSERVATION_SIZE`` (see ``entities.Agent.observation``).
     ``bullet_sensing=True`` instead returns a dict with that ``state`` vector and
     a variable-length ``bullets`` array (N, 4), limited by cone, range and walls.
+    ``angular_regions=True`` replaces enemy rays with six continuous sectors and
+    a separate center-ray flag/distance, giving ``ANGULAR_OBSERVATION_SIZE`` state values.
     Action: ``MultiDiscrete([9, 3, 2])`` = (move, aim, fire).
     """
 
@@ -154,6 +157,7 @@ class HuntEnv(gym.Env):
         shoot_back: bool = False,
         map_seeds: Sequence[int] | None = None,
         bullet_sensing: bool = False,
+        angular_regions: bool = False,
     ):
         super().__init__()
         if map_seeds is not None:
@@ -178,7 +182,8 @@ class HuntEnv(gym.Env):
         self.bullet_sensing = bullet_sensing
         self.set_stage(stage)
 
-        self.observation_space = gym.spaces.Box(-1.0, 1.0, shape=(OBSERVATION_SIZE,), dtype=np.float32)
+        obs_size = ANGULAR_OBSERVATION_SIZE if angular_regions else OBSERVATION_SIZE
+        self.observation_space = gym.spaces.Box(-1.0, 1.0, shape=(obs_size,), dtype=np.float32)
         if bullet_sensing:
             self.observation_space = gym.spaces.Dict({
                 "state": self.observation_space,
@@ -189,7 +194,7 @@ class HuntEnv(gym.Env):
             })
         self.action_space = gym.spaces.MultiDiscrete(ACTION_DIMS)
 
-        self.agent = Agent(agent_id=0)
+        self.agent = Agent(agent_id=0, angular_regions=angular_regions)
         self.threat = ShootingThreat() if shoot_back else Threat()
         self.bullets: list[Bullet] = []
         self.threat_bullets: list[Bullet] = []

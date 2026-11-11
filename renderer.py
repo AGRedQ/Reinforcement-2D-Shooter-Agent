@@ -9,7 +9,8 @@ to your aim, Q/E or the arrow keys aim, Space fires. ``--stage N`` picks the sta
 ``--map-seeds`` selects generated maps with the same seed-cycle rules as the
 random-map trainer; combine with ``--shoot-back`` to play the full combat mode.
 R toggles discrete rays, T toggles movement trails, and F toggles the frame cap.
-Sight regions are not filled; rendering does not change policy observations.
+Angular-region previews use translucent, wall-clipped fills; legacy rays stay
+unfilled. Rendering does not change policy observations.
 Use ``--headless --screenshot PATH --seed N`` to capture a reproducible frame.
 """
 
@@ -24,7 +25,7 @@ import numpy as np
 import pygame
 
 from dashboard import MetricsDashboard
-from entities import CONE_RAY_INDICES, MOVE_DIRECTIONS, Player
+from entities import CONE_RAY_INDICES, ENEMY_REGION_EDGES, MOVE_DIRECTIONS, RAY_LENGTH, Player, ray_aabb_distances
 from environments import STAGES, HuntEnv
 
 BACKGROUND = (20, 27, 35)
@@ -76,6 +77,7 @@ class Renderer(HuntEnv):
         self._arena: pygame.Surface | None = None
         self._floor: pygame.Surface | None = None
         self._walls: pygame.Surface | None = None
+        self._region_overlay: pygame.Surface | None = None
         self._trails: tuple[deque[np.ndarray], deque[np.ndarray]] = (
             deque(maxlen=48), deque(maxlen=48),
         )
@@ -143,6 +145,8 @@ class Renderer(HuntEnv):
         self._arena.blit(self._floor, (0, 0))
         if self.show_trails:
             self._draw_trails()
+        if self.show_rays and self.agent.angular_regions:
+            self._draw_region_fills()
         self._arena.blit(self._walls, (0, 0))
         if self.show_rays:
             self._draw_rays()
@@ -211,6 +215,7 @@ class Renderer(HuntEnv):
         for y in range(0, int(self.layout.height), 40):
             pygame.draw.line(self._floor, (26, 34, 43), self._point((0, y)), self._point((self.layout.width, y)))
         self._walls = pygame.Surface(size, pygame.SRCALPHA)
+        self._region_overlay = pygame.Surface(size, pygame.SRCALPHA)
         for wall in self.layout.walls:
             rect = pygame.Rect(*self._point((wall.x, wall.y)), *self._point((wall.width, wall.height)))
             pygame.draw.rect(self._walls, (9, 15, 22, 130), rect.move(3 * RENDER_SCALE, 4 * RENDER_SCALE))
@@ -230,12 +235,57 @@ class Renderer(HuntEnv):
         pygame.draw.line(self._arena, streak_color, self._point(end), self._point(position), 3 * RENDER_SCALE)
         pygame.draw.circle(self._arena, color, self._point(position), 2 * RENDER_SCALE)
 
+    def _draw_region_fills(self) -> None:
+        overlay = self._region_overlay
+        overlay.fill((0, 0, 0, 0))
+        origin = self.agent.position
+        boxes = self.layout.boxes
+        corners = boxes[:, [0, 1, 2, 1, 2, 3, 0, 3]].reshape(-1, 2) - origin
+        corner_angles = (
+            np.arctan2(corners[:, 1], corners[:, 0]) - self.agent.angle + np.pi
+        ) % (2 * np.pi) - np.pi
+        for i, (left, right) in enumerate(zip(ENEMY_REGION_EDGES[:-1], ENEMY_REGION_EDGES[1:])):
+            # Extra samples around corners preserve sharp wall shadows in the fan.
+            angles = np.unique(np.clip(np.concatenate((
+                np.linspace(left, right, max(2, int(np.ceil(np.degrees(right - left))) + 1)),
+                corner_angles - 1e-7, corner_angles, corner_angles + 1e-7,
+            )), left, right))
+            world_angles = angles + self.agent.angle
+            directions = np.column_stack((np.cos(world_angles), np.sin(world_angles)))
+            distances = np.minimum(ray_aabb_distances(origin, directions, boxes), RAY_LENGTH)
+            points = [self._point(origin)] + [
+                self._point(point) for point in origin + directions * distances[:, None]
+            ]
+            color = CONE_RAY_HIT_COLOR if self.agent.enemy_detected[i] else CONE_RAY_COLOR
+            alpha = 55 if self.agent.enemy_detected[i] else (24 if i % 2 == 0 else 36)
+            pygame.draw.polygon(overlay, (*color, alpha), points)
+        self._arena.blit(overlay, (0, 0))
+
     def _draw_rays(self) -> None:
         agent = self.agent
         origin = agent.position
         directions = agent.ray_directions()
         for direction, dist in zip(directions, agent.wall_distances):
             pygame.draw.line(self._arena, WALL_RAY_COLOR, self._point(origin), self._point(origin + direction * dist), RENDER_SCALE)
+        if agent.angular_regions:
+            angles = agent.angle + ENEMY_REGION_EDGES
+            boundaries = np.column_stack((np.cos(angles), np.sin(angles)))
+            distances = np.minimum(ray_aabb_distances(origin, boundaries, self.layout.boxes), RAY_LENGTH)
+            for direction, dist in zip(boundaries, distances):
+                pygame.draw.line(
+                    self._arena, CONE_RAY_COLOR, self._point(origin),
+                    self._point(origin + direction * dist), RENDER_SCALE,
+                )
+            for detected, point in zip(agent.enemy_detected, agent.region_points):
+                if detected:
+                    pygame.draw.line(self._arena, CONE_RAY_HIT_COLOR, self._point(origin), self._point(point), RENDER_SCALE)
+            distance = agent.center_distance if agent.center_detected else agent.wall_distances[0]
+            color = CONE_RAY_HIT_COLOR if agent.center_detected else CONE_RAY_COLOR
+            pygame.draw.line(
+                self._arena, color, self._point(origin),
+                self._point(origin + agent.forward * distance), 2 * RENDER_SCALE,
+            )
+            return
         for k, i in enumerate(CONE_RAY_INDICES):
             if agent.enemy_detected[k]:
                 end, color = origin + directions[i] * agent.enemy_distances[k], CONE_RAY_HIT_COLOR
@@ -293,7 +343,10 @@ class Renderer(HuntEnv):
         )
         screen.blit(self._small_font.render(controls, True, (158, 179, 190)), (18, y + 88))
         screen.blit(
-            self._small_font.render("Discrete sensor rays only / undetected targets are dimmed for the observer", True, (122, 145, 161)),
+            self._small_font.render(
+                ("Angular regions + center ray" if self.agent.angular_regions else "Discrete sensor rays only")
+                + " / undetected targets are dimmed for the observer", True, (122, 145, 161),
+            ),
             (18, y + 108),
         )
 

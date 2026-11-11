@@ -5,6 +5,8 @@ Deep Sets: python training_random_map.py --bullet-sensing --map-seeds 9 [--rende
 Watch Deep Sets: python training_random_map.py --watch --bullet-sensing --map-seeds '[2,7,11]'
 Fight Deep Sets: python training_random_map.py --play-against --bullet-sensing --map-seeds '[4]'
 Fight MLP: python training_random_map.py --play-against --model mlp_ppo_raised_damage
+Angular regions: python training_random_map.py --angular-regions --bullet-sensing --map-seeds 9 --render
+Watch angular: python training_random_map.py --watch --model angular_deep_sets_ppo
 Watch: python training_random_map.py --watch --map-seeds '[2,7,11]'
 Play:  python renderer.py --shoot-back --map-seeds '[5]'
 
@@ -24,6 +26,14 @@ the map cycle from the first seed; pass --map-seeds again to retain your selecti
 Includes shooting threats, damage/death, threat respawns, curriculum replay,
 PPO updates, --render, and the Streamlit/Plotly dashboard with graceful Stop and
 CSV export. --no-dashboard disables the dashboard.
+
+Every training run also creates a unique folder under reports/ (override with
+--report-dir PATH). metrics.csv is flushed every 10 completed episodes, even
+without the dashboard. Metrics use the last up to 100 episodes across workers,
+including replay; PPO statistics are from the latest completed update.
+On normal stop or Ctrl+C, remaining episodes are saved as a partial sample and
+report.html provides an offline summary and charts. Resumes create separate
+reports with cumulative episode numbers. This does not change checkpoint saving.
 
 Default checkpoint: checkpoints/mlp_ppo_raised_damage.pt. Training automatically resumes
 it if present. --model NAME can fine-tune a compatible hunting/combat checkpoint;
@@ -50,6 +60,18 @@ your 60-degree cone, 600-unit range and line of sight. H toggles wallhack plus
 agent rays; --player-hacks starts enabled. Hacks never change AI observations.
 Player deaths respawn as in hunting; agent death/time limit resets the round.
 --episodes sets the round count. No training or checkpoint writes occur.
+
+--angular-regions opts new policies into six gap-free enemy regions with boundaries
+-30,-15,-5,0,5,15,30 degrees relative to aim. Enemy circle overlap and wall
+occlusion determine each region's presence and nearest visible surface distance.
+A separate zero-width center ray supplies its own flag/distance (alignment, not
+a shooting gate). Wall rays, bullet sensing, weapons and rewards are unchanged.
+The base observation grows from 60 to 64 values: walls 32, region flags 6,
+region distances 6, center flag/distance 2, velocity 2, cooldown/health 2,
+previous action 14. With Deep Sets the decision MLP receives 96 values.
+Defaults: angular_deep_sets_ppo.pt with --bullet-sensing, otherwise angular_mlp_ppo.pt.
+This starts fresh; legacy checkpoints keep their old ray observations. Resume,
+watch and --play-against restore sensing from metadata with --model NAME.
 """
 
 from models.ppo import parse_args as parse_training_args

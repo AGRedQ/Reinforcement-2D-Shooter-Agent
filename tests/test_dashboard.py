@@ -18,7 +18,7 @@ from models import ppo
 from dashboard import MetricsDashboard
 from dashboard_app import export_csv, metric_figure, smoothed
 
-APP_PATH = Path(__file__).with_name("dashboard_app.py")
+APP_PATH = Path(__file__).resolve().parents[1] / "dashboard_app.py"
 METRICS = {**ppo.EPISODE_METRICS, **ppo.COMBAT_METRICS, **ppo.PPO_METRICS}
 
 
@@ -196,6 +196,7 @@ class DashboardTrainingTests(unittest.TestCase):
                     "--num-envs", "2", "--max-steps", "12",
                     "--rollout-steps", "4", "--minibatch-size", "8",
                     "--hidden-size", "16", "--epochs", "1",
+                    "--report-dir", str(Path(directory) / "reports"),
                 ])
                 with (
                     patch.object(ppo, "CHECKPOINTS_DIR", Path(directory)),
@@ -216,7 +217,7 @@ class DashboardTrainingTests(unittest.TestCase):
     def test_no_dashboard_does_not_import_streamlit_or_plotly(self):
         result = subprocess.run(
             [sys.executable, "-c", "import sys; import models.ppo; assert 'streamlit' not in sys.modules; assert 'plotly' not in sys.modules"],
-            cwd=Path(__file__).parent, capture_output=True, text=True, timeout=30,
+            cwd=APP_PATH.parent, capture_output=True, text=True, timeout=30,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 

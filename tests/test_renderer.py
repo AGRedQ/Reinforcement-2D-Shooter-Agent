@@ -4,7 +4,7 @@ from unittest.mock import patch
 import numpy as np
 import pygame
 
-from entities import Bullet
+from entities import Bullet, Wall
 from environments import HuntEnv, MapLayout
 from renderer import BACKGROUND, BULLET_COLOR, THREAT_BULLET_COLOR, WALL_COLOR, Renderer
 
@@ -82,6 +82,34 @@ class RendererTests(unittest.TestCase):
         for wall in env.layout.walls:
             center = env._point((wall.x + wall.width / 2, wall.y + wall.height / 2))
             self.assertEqual(tuple(env._walls.get_at(center))[:3], WALL_COLOR)
+
+    def test_angular_fills_toggle_clip_and_do_not_change_observations(self):
+        env = self.renderer(
+            angular_regions=True, layout=MapLayout(800, 800, [Wall(250, 50, 20, 100)]),
+            show_rays=False,
+        )
+        env.reset(seed=7)
+        env.agent.reset(np.array([100., 100.]), 0.)
+        env.threat.reset(np.array([700., 700.]), 0., False)
+        env.agent.sense(env.layout.boxes, [env.threat])
+        before = env.agent.observation().copy()
+        env.render()
+        screen = pygame.display.get_surface()
+        visible_pixel = (200, 125)
+        shadow_pixel = (350, 125)
+        outside_pixel = (150, 200)
+        unfilled = tuple(screen.get_at(visible_pixel))
+        shadow = tuple(screen.get_at(shadow_pixel))
+        outside = tuple(screen.get_at(outside_pixel))
+        env.show_rays = True
+        env.render()
+        self.assertNotEqual(tuple(screen.get_at(visible_pixel)), unfilled)
+        self.assertEqual(tuple(screen.get_at(shadow_pixel)), shadow)
+        self.assertEqual(tuple(screen.get_at(outside_pixel)), outside)
+        np.testing.assert_array_equal(env.agent.observation(), before)
+        env.show_rays = False
+        env.render()
+        self.assertEqual(tuple(screen.get_at(visible_pixel)), unfilled)
 
 
 if __name__ == "__main__":
