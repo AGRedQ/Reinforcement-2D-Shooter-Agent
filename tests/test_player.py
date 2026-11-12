@@ -98,7 +98,7 @@ class PlayerRendererTests(unittest.TestCase):
 
     def test_hacks_reveal_hidden_agent_without_changing_observation(self):
         env = self.env(layout=MapLayout(800.0, 800.0, [Wall(180.0, 0.0, 20.0, 800.0)]),
-                       bullet_sensing=True)
+                       bullet_sensing=True, show_visibility=True)
         env.agent.reset(np.array([300.0, 100.0]), math.pi)
         env.threat.reset(np.array([100.0, 100.0]), 0.0, False)
         env.agent.sense(env.layout.boxes, [env.threat])
@@ -108,11 +108,12 @@ class PlayerRendererTests(unittest.TestCase):
         assert screen is not None
         self.assertEqual(tuple(screen.get_at((300, 100)))[:3], BACKGROUND)
         self.assertFalse(env.show_rays)
-        for key in [pygame.K_r, pygame.K_t]:
+        for key in [pygame.K_r, pygame.K_t, pygame.K_v]:
             pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=key))
         env.render()
         self.assertFalse(env.show_rays)
         self.assertFalse(env.show_trails)
+        self.assertFalse(env.show_visibility)
         pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_h))
         env.render()
         self.assertTrue(env.player_hacks)
