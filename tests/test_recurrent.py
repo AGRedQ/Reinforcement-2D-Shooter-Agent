@@ -14,7 +14,10 @@ from environments import Curriculum
 from models.mlp import ActorCritic, batch_observations
 from models.ppo import save_checkpoint
 from models.recurrent import ObservationHistory, RecurrentActorCritic, batch_histories
-from training_bilstm_random_map import fingerprint, main, paired_comparison, parse_args, restore_policy
+from models.runtime import fingerprint, load_policy as restore_policy
+from models.evaluation import paired_comparison
+from models.curriculum_ppo import FinalStageWindow, training_settings
+from training_bilstm_scratch import main, parse_args
 
 
 def observation(value=0.0, bullets=0):
@@ -96,78 +99,140 @@ class RecurrentTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "matching"):
             paired_comparison(rows, "bilstm", "frozen", 4, 100)
 
-    def test_real_training_comparison_safe_save_resume_and_evaluate_only(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = root / "source.pt"
-            base = ActorCritic(hidden_size=16, bullet_sensing=True, angular_regions=True)
-            save_checkpoint(source, base, torch.optim.Adam(base.parameters()), Curriculum(),
-                            {"global_step": 100, "episodes": 10, "updates": 2}, 16)
-            original = fingerprint(source)
-            argv = ["--baseline", str(source), "--run-dir", str(root / "run"),
-                    "--steps", "32", "--num-envs", "2", "--rollout-steps", "8",
-                    "--minibatch-size", "8", "--epochs", "2", "--context-length", "4",
-                    "--lstm-hidden-size", "8", "--max-steps", "8", "--eval-maps", "[10]",
-                    "--eval-seeds", "100", "--eval-stages", "0", "--save-every", "1"]
-            with contextlib.redirect_stdout(io.StringIO()):
-                result = main(argv)
-            self.assertEqual(fingerprint(source), original)
-            self.assertEqual(result["summary_by_stage"]["0"]["bilstm"]["episodes"], 1)
-            policy, saved = restore_policy(root / "run/bilstm_seed_0.pt")
-            self.assertEqual(saved["global_step"], 32)
-            self.assertGreater(policy.memory_projection.weight.detach().norm().item(), 0)
-            self.assertTrue((root / "run/comparison.html").exists())
-            self.assertTrue((root / "run/evaluation.csv").exists())
-            argv[argv.index("--steps") + 1] = "64"
-            with contextlib.redirect_stdout(io.StringIO()):
-                main([*argv, "--resume"])
-                main(["--run-dir", str(root / "run"), "--evaluate-only"])
-            _, saved = restore_policy(root / "run/bilstm_seed_0.pt")
-            self.assertEqual(saved["global_step"], 64)
-            self.assertEqual(fingerprint(source), original)
-            manifest = json.loads((root / "run/experiment.json").read_text())
-            self.assertEqual(manifest["source_sha256"], original)
+    def scratch_argv(self, root, steps=34):
+        return ["--model", str(root / "model.pt"), "--run-dir", str(root / "run"),
+                "--steps", str(steps), "--num-envs", "2", "--rollout-steps", "8",
+                "--minibatch-size", "8", "--epochs", "1", "--context-length", "4",
+                "--lstm-hidden-size", "8", "--hidden-size", "16", "--max-steps", "8",
+                "--save-every", "1", "--no-dashboard", "--device", "cpu", "--skip-evaluation"]
 
-    def test_scratch_training_never_warm_starts_and_hits_exact_partial_rollout_budget(self):
-        from training_bilstm_scratch import main as scratch_main
+    def test_defaults_match_baseline_and_only_architecture_changes(self):
+        import training_random_map
+        baseline = training_random_map.parse_args([])
+        recurrent = parse_args([])
+        control = parse_args(["--architecture", "feedforward"])
+        self.assertEqual(training_settings(baseline), training_settings(recurrent))
+        self.assertEqual(training_settings(control), training_settings(recurrent))
+        self.assertEqual(recurrent.num_envs, 8)
+        self.assertEqual(recurrent.rollout_steps, 256)
+        self.assertEqual(recurrent.minibatch_size, 512)
+        self.assertTrue(recurrent.until_curriculum_complete)
+
+    def test_final_stage_requires_qualifying_full_reward_window(self):
+        gate = FinalStageWindow(2, 35)
+        self.assertFalse(gate.complete)
+        gate.record(dict(stage=4,replay=1,reward=100))
+        gate.record(dict(stage=3,replay=0,reward=100))
+        self.assertEqual(len(gate.rewards),0)
+        gate.record(dict(stage=4,replay=0,reward=40))
+        self.assertFalse(gate.complete)
+        gate.record(dict(stage=4,replay=0,reward=30))
+        self.assertTrue(gate.complete)
+        gate.record(dict(stage=4,replay=0,reward=0))
+        self.assertFalse(gate.complete)
+
+    def test_scratch_exact_budget_resume_no_pretraining_and_configuration_guard(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            argv = ["--run-dir", str(root), "--steps", "34", "--num-envs", "2",
-                    "--rollout-steps", "8", "--minibatch-size", "8", "--epochs", "1",
-                    "--context-length", "4", "--lstm-hidden-size", "8", "--hidden-size", "16",
-                    "--max-steps", "8", "--save-every", "1", "--skip-evaluation",
-                    "--compare-to", str(root / "DOES_NOT_EXIST.pt")]
-            with patch.object(RecurrentActorCritic, "warm_start", side_effect=AssertionError("Pretrained weights forbidden")):
+            root=Path(directory)
+            argv=self.scratch_argv(root)
+            argv += ["--compare-to",str(root/"DOES_NOT_EXIST.pt")]
+            with patch.object(RecurrentActorCritic,"warm_start",side_effect=AssertionError("No pretrained weights")):
                 with contextlib.redirect_stdout(io.StringIO()):
-                    checkpoint = scratch_main(argv)
-            policy, saved = restore_policy(checkpoint)
-            self.assertEqual(saved["global_step"], 34)
-            self.assertEqual(saved["updates"], 3)
-            self.assertEqual(saved["initialization"], "random")
+                    checkpoint=main(argv)
+            policy,saved=restore_policy(checkpoint)
+            self.assertEqual(saved["global_step"],34)
+            self.assertEqual(saved["updates"],3)
+            self.assertEqual(saved["initialization"],"random")
             self.assertIsNone(saved["source_sha256"])
-            self.assertEqual(saved["curriculum"]["stage"], 0)
-            self.assertGreater(policy.memory_projection.weight.detach().norm().item(), 0)
-            status = json.loads((root / "status.json").read_text())
-            self.assertEqual(status["status"], "complete")
-            self.assertEqual(status["pretrained_steps"], 0)
-            self.assertEqual(status["global_step"], 34)
-            argv[argv.index("--steps") + 1] = "50"
+            self.assertFalse(saved["curriculum_complete"])
+            self.assertGreater(policy.memory_projection.weight.detach().norm().item(),0)
+            argv[argv.index("--steps")+1]="50"
             with contextlib.redirect_stdout(io.StringIO()):
-                scratch_main([*argv, "--resume"])
-            _, saved = restore_policy(checkpoint)
-            self.assertEqual(saved["global_step"], 50)
-            evaluation_baseline = root / "evaluation_baseline.pt"
-            base = ActorCritic(hidden_size=16, bullet_sensing=True, angular_regions=True)
-            save_checkpoint(evaluation_baseline, base, torch.optim.Adam(base.parameters()), Curriculum(),
-                            {"global_step": 100, "episodes": 10, "updates": 2}, 16)
+                main([*argv,"--resume"])
+            _,saved=restore_policy(checkpoint)
+            self.assertEqual(saved["global_step"],50)
+            # Explicit changed learning rate must not silently alter a controlled run.
+            with self.assertRaisesRegex(ValueError,"configuration differs"):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    main([*argv,"--resume","--lr","0.0001"])
+
+    def test_real_curriculum_completes_stage_four_instead_of_only_reaching_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            argv=self.scratch_argv(root,256)
+            argv[argv.index("--max-steps")+1]="4"
+            argv += ["--promotion-window","1","--promotion-reward","-100000"]
+            with contextlib.redirect_stdout(io.StringIO()):
+                checkpoint=main(argv)
+            _,saved=restore_policy(checkpoint)
+            self.assertTrue(saved["curriculum_complete"])
+            self.assertEqual(saved["completed_stages"],[0,1,2,3,4])
+            self.assertEqual([e["completed_stage"] for e in saved["stage_history"]],[0,1,2,3])
+            self.assertLess(saved["global_step"],256)
+            self.assertTrue(saved["final_stage"]["complete"])
+
+    def test_post_training_comparison_and_evaluate_only_preserve_reference(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            base=ActorCritic(hidden_size=16,bullet_sensing=True,angular_regions=True)
+            baseline=root/"baseline.pt"
+            save_checkpoint(baseline,base,torch.optim.Adam(base.parameters()),Curriculum(),
+                            {"global_step":100,"episodes":10,"updates":2},16)
+            original=fingerprint(baseline)
+            argv=self.scratch_argv(root,16)
             argv.remove("--skip-evaluation")
-            argv[argv.index("--compare-to") + 1] = str(evaluation_baseline)
+            argv += ["--compare-to",str(baseline),"--eval-maps","[14]","--eval-seeds","100","--eval-stages","0","4"]
             with contextlib.redirect_stdout(io.StringIO()):
-                scratch_main([*argv, "--resume"])
-            results = json.loads((root / "comparison.json").read_text())
-            self.assertEqual(set(results["summary_by_stage"]["4"]),
-                             {"frozen", "bilstm", "bilstm_current_only"})
-            self.assertEqual(results["manifest"]["pretrained_steps"], 0)
+                checkpoint=main(argv)
+                main([*argv,"--evaluate-only"])
+            self.assertEqual(fingerprint(baseline),original)
+            result=json.loads((root/"run/comparison.json").read_text())
+            self.assertEqual(set(result["summary_by_stage"]["4"]),{"frozen","bilstm","bilstm_current_only"})
+            self.assertFalse(result["manifest"]["fairness_audit"]["reference_training_config_recorded"])
+            self.assertFalse(result["manifest"]["fairness_audit"]["controlled_architecture_only_claim"])
+            self.assertEqual(result["manifest"]["candidate_steps"],16)
+
+    @unittest.skipUnless(torch.cuda.is_available(),"CUDA is inaccessible in this process")
+    def test_cuda_training_checkpoint_and_resume(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            argv=self.scratch_argv(root,16)
+            argv[argv.index("--device")+1]="cuda"
+            with contextlib.redirect_stdout(io.StringIO()):
+                checkpoint=main(argv)
+            policy,saved=restore_policy(checkpoint,"cuda")
+            self.assertEqual(next(policy.parameters()).device.type,"cuda")
+            self.assertTrue(saved["training_device"].startswith("cuda"))
+            self.assertTrue(all(torch.isfinite(value).all() for value in saved["model"].values()))
+            argv[argv.index("--steps")+1]="32"
+            with contextlib.redirect_stdout(io.StringIO()):
+                main([*argv,"--resume"])
+            _,saved=restore_policy(checkpoint)
+            self.assertEqual(saved["global_step"],32)
+
+    def test_automatic_matched_control_uses_identical_settings_and_budget(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            baseline=root/'historical.pt'
+            base=ActorCritic(hidden_size=16,bullet_sensing=True,angular_regions=True)
+            save_checkpoint(baseline,base,torch.optim.Adam(base.parameters()),Curriculum(),
+                            {'global_step':100,'episodes':10,'updates':2},16)
+            original=fingerprint(baseline)
+            argv=self.scratch_argv(root,16)
+            argv.remove('--skip-evaluation')
+            argv += ['--train-control','--compare-to',str(baseline),'--eval-maps','[14]',
+                     '--eval-seeds','100','--eval-stages','4']
+            with contextlib.redirect_stdout(io.StringIO()):
+                checkpoint=main(argv)
+            _,candidate=restore_policy(checkpoint)
+            _,control=restore_policy(root/'model_feedforward_control.pt')
+            self.assertEqual(candidate['global_step'],control['global_step'])
+            self.assertEqual(candidate['training_config'],control['training_config'])
+            matched=json.loads((root/'run/matched_comparison/comparison.json').read_text())
+            self.assertTrue(matched['manifest']['fairness_audit']['controlled_architecture_only_claim'])
+            self.assertEqual(fingerprint(baseline),original)
+            status=json.loads((root/'run/pipeline_status.json').read_text())
+            self.assertEqual(status['phase'],'complete')
 
 
 if __name__ == "__main__":

@@ -248,14 +248,15 @@ def ppo_update(policy: ActorCritic, optimizer, batch: dict, args) -> dict[str, f
     size = len(actions)
     stats = {k: [] for k in ("policy_loss", "value_loss", "entropy", "approx_kl", "clip_fraction")}
     for _ in range(args.epochs):
-        permutation = torch.randperm(size)
+        permutation = torch.randperm(size, device=actions.device)
         for start in range(0, size, args.minibatch_size):
             idx = permutation[start : start + args.minibatch_size]
             log_probs, entropy, values = policy.evaluate(select_observations(obs, idx), actions[idx])
             log_ratio = log_probs - old_log_probs[idx]
             ratio = log_ratio.exp()
             adv = advantages[idx]
-            adv = (adv - adv.mean()) / (adv.std() + 1e-8)
+            scale = adv.std() if adv.numel() > 1 else torch.zeros((), device=adv.device)
+            adv = (adv - adv.mean()) / (scale + 1e-8)
             policy_loss = torch.max(-adv * ratio, -adv * ratio.clamp(1 - args.clip, 1 + args.clip)).mean()
             value_loss = 0.5 * (values - returns[idx]).pow(2).mean()
             entropy_mean = entropy.mean()
@@ -670,6 +671,7 @@ def parse_args(
     argv=None, *, description: str | None = __doc__,
     default_model: str = DEFAULT_MODEL_NAME, random_maps: bool = False,
     default_sensing: bool = False,
+    add_arguments=None,
 ):
     p = argparse.ArgumentParser(description=description, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument(
@@ -730,6 +732,8 @@ def parse_args(
         from map_generation import MAP_SEEDS_HELP, parse_map_seeds
 
         p.add_argument("--map-seeds", type=parse_map_seeds, default="9", help=MAP_SEEDS_HELP)
+    if add_arguments is not None:
+        add_arguments(p)
     args = p.parse_args(argv)
     args.bullet_sensing_requested = args.bullet_sensing
     args.angular_regions_requested = args.angular_regions
