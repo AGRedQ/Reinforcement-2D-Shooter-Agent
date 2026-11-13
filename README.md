@@ -6,6 +6,14 @@ Agents learn from numerical observations of walls, enemies, and incoming bullets
 
 For detailed architecture notes, experiment settings, and troubleshooting, see the [repository guide](REPOSITORY_GUIDE.md).
 
+## Demo
+
+<!-- For GitHub inline playback, replace the link below with the bare URL generated
+     by uploading the demo in GitHub's Markdown editor. Repository video paths do not
+     embed a player. Free GitHub plans require videos smaller than 10 MB. -->
+
+[Watch the demo video](output/demo_video/video_demo.webm).
+
 ## Features
 
 - **Generated arenas:** seeded obstacle layouts in an 800 × 800 arena, with walls that block movement, bullets, and sight.

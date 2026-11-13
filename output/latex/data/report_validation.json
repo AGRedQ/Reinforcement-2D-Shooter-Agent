@@ -1,0 +1,27 @@
+{
+  "date": "2026-11-12",
+  "pages": 8,
+  "format": "IEEEtran conference, two columns, US letter",
+  "all_pages_visually_reviewed": true,
+  "raw_evaluation_and_bootstrap_checks": "passed",
+  "application_source_changes": false,
+  "software_tests": {
+    "discovered_entries": 95,
+    "passed": 92,
+    "failed": 1,
+    "import_errors": 1,
+    "skipped": 1
+  },
+  "compile_engine": "Tectonic 0.17.0",
+  "compile_succeeded": true,
+  "limitations": [
+    "One training seed per architecture",
+    "Software test suite has documented unresolved failures"
+  ],
+  "authors": [
+    "Minh Quan Dinh",
+    "Quoc Anh Phan"
+  ],
+  "author_revision": "Author names use the requested English order without diacritics. PDF text extraction and rendered cover verified.",
+  "author_order_and_spelling_verified": true
+}

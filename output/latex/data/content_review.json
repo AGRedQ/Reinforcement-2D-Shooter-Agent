@@ -1,0 +1,85 @@
+{
+  "review_scope": "Academic paper coverage checked against project source, documentation, archived source hashes, and saved experiments",
+  "sections": {
+    "Introduction and Related Work": [
+      "Research questions and system contributions",
+      "PPO, GAE, Deep Sets, LSTM, DRQN, curriculum learning citations"
+    ],
+    "Environment and Problem Formulation": [
+      "POMDP",
+      "passive hunt and scripted combat",
+      "seeded maps and clearances",
+      "body and projectile physics",
+      "weapons and opponent AI",
+      "factorized actions",
+      "combat rewards and optional exploration"
+    ],
+    "Observation Representation": [
+      "64-state layout",
+      "legacy 60-value observations",
+      "angular occlusion sensing",
+      "variable hostile bullet features",
+      "masked mean/max/count set encoder"
+    ],
+    "Policy Architectures": [
+      "feedforward, LSTM, BiLSTM",
+      "parameter counts and initialization",
+      "bounded past-only context",
+      "residual projection",
+      "episode isolation and masks"
+    ],
+    "Learning Procedure": [
+      "clipped PPO and exact loss weights",
+      "GAE termination versus truncation bootstrap",
+      "parallel CPU simulation and CPU/CUDA learning",
+      "rollout/minibatch accounting",
+      "five-stage curriculum and qualification"
+    ],
+    "System Features and Experimental Records": [
+      "dashboard and offline reports",
+      "checkpoints and resume constraints",
+      "symmetric self-play and frozen-policy refresh",
+      "human play and headless rendering"
+    ],
+    "Experimental Design": [
+      "matched scratch training settings",
+      "candidate-determined transition budget",
+      "held-out maps/spawn seeds/stages",
+      "deterministic evaluation",
+      "metric definitions",
+      "paired bootstrap",
+      "history ablation and separate historical benchmarks"
+    ],
+    "Results and Analysis": [
+      "training mastery and compute cost",
+      "all-stage success",
+      "stage-4 offense and survival",
+      "history ablation uncertainty",
+      "earlier experiment context"
+    ],
+    "Verification, Limitations, and Reproducibility": [
+      "recorded test failures and skipped CUDA test",
+      "360-episode metrics and confidence interval checks",
+      "single seed and capacity/cost confounds",
+      "finite memory and scripted-opponent scope",
+      "commands supplied in BUILD.txt"
+    ]
+  },
+  "figure_revision": {
+    "legend": "Dedicated row above both panels, checked for overlap with axes labels and titles",
+    "training_returns": "Original rolling CSV means, no added smoothing or synthetic results",
+    "curriculum": "Exact checkpoint stage_history events, extended to each final transition count",
+    "print_accessibility": "Distinct solid and dashed line styles"
+  },
+  "scientific_limits_retained": [
+    "One training seed per primary architecture",
+    "Bootstrap interval covers sampled paired trials, not independent training variability",
+    "History ablation changes input distribution",
+    "BiLSTM has more parameters and lower throughput",
+    "Adaptive curricula create different stage exposure",
+    "Historical comparisons have unknown training settings",
+    "Self-play is supported but not the matched quantitative benchmark"
+  ],
+  "application_files_modified": false,
+  "new_training_or_evaluation_performed": false
+}

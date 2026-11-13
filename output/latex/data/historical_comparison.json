@@ -1,0 +1,836 @@
+{
+  "manifest": {
+    "candidate_checkpoint": "/home/whopqa/Documents/FPT/REL/Reinforcement-2D-Shooter-Agent/checkpoints/bilstm_gpu_all_stages_20261112.pt",
+    "candidate_sha256": "5271a7c39e28ee8903974bd8dd5b18c99a71efe4ee1e56dfc0a03b6a6ba47c14",
+    "candidate_steps": 2769992,
+    "candidate_curriculum": 4,
+    "candidate_curriculum_complete": true,
+    "reference_checkpoint": "/home/whopqa/Documents/FPT/REL/Reinforcement-2D-Shooter-Agent/checkpoints/angular_deep_sets_ppo.pt",
+    "reference_snapshot": "/home/whopqa/Documents/FPT/REL/Reinforcement-2D-Shooter-Agent/reports/bilstm_gpu_all_stages_20261112/reference_baseline.pt",
+    "reference_sha256": "63c50ab6c790cdfa031b35d029a9b4241d20d26064aee4666f325fd9e8011023",
+    "reference_steps": 2501688,
+    "reference_current_sha256": "63c50ab6c790cdfa031b35d029a9b4241d20d26064aee4666f325fd9e8011023",
+    "reference_curriculum": 4,
+    "training_result": {
+      "reason": "curriculum complete",
+      "global_step": 2769992,
+      "episodes": 3748,
+      "updates": 1353,
+      "curriculum_complete": true
+    },
+    "fairness_audit": {
+      "same_evaluation_conditions": true,
+      "reference_training_config_recorded": false,
+      "training_config_differences": null,
+      "equal_transition_budget": false,
+      "same_random_initialization": false,
+      "same_training_device": false,
+      "controlled_architecture_only_claim": false,
+      "note": "Missing historical configuration cannot be reconstructed from model weights. Use a fresh feedforward control with the same saved settings and budget for an architecture-only study."
+    },
+    "candidate_training_config": {
+      "seed": 0,
+      "num_envs": 8,
+      "rollout_steps": 256,
+      "minibatch_size": 512,
+      "epochs": 4,
+      "lr": 0.0003,
+      "gamma": 0.99,
+      "gae_lambda": 0.95,
+      "clip": 0.2,
+      "ent_coef": 0.01,
+      "vf_coef": 0.5,
+      "max_grad_norm": 0.5,
+      "hidden_size": 256,
+      "max_steps": 1000,
+      "map_seeds": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "promotion_reward": 35.0,
+      "promotion_window": 100,
+      "replay_probability": 0.2,
+      "bullet_sensing": true,
+      "angular_regions": true,
+      "exploration_bonus": false,
+      "shoot_back": true,
+      "self_play": false,
+      "optimizer": "Adam",
+      "adam_eps": 1e-05
+    },
+    "reference_training_config": null,
+    "evaluation_config": {
+      "maps": [
+        14,
+        15,
+        16,
+        17
+      ],
+      "seeds": [
+        20000,
+        20001,
+        20002,
+        20003,
+        20004,
+        20005
+      ],
+      "stages": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "max_steps": 1000,
+      "deterministic": true,
+      "replay_probability": 0.0,
+      "exploration_bonus": false
+    }
+  },
+  "success_definition": "At least one kill AND alive at the episode time limit",
+  "primary_stage": 4,
+  "summary_by_stage": {
+    "0": {
+      "bilstm": {
+        "reward": 117.54166666666667,
+        "kills": 16.916666666666668,
+        "combat_success": 0.8333333333333334,
+        "survival": 0.8333333333333334,
+        "kill_episode": 1.0,
+        "damage_taken": 46.875,
+        "length": 957.3333333333334,
+        "episodes": 24,
+        "death_rate": 0.16666666666666663,
+        "hit_rate": 0.8447837150127226,
+        "kills_per_1000_steps": 17.670612813370475
+      },
+      "bilstm_current_only": {
+        "reward": 120.29166666666667,
+        "kills": 17.333333333333332,
+        "combat_success": 0.6666666666666666,
+        "survival": 0.6666666666666666,
+        "kill_episode": 1.0,
+        "damage_taken": 53.125,
+        "length": 869.2916666666666,
+        "episodes": 24,
+        "death_rate": 0.33333333333333337,
+        "hit_rate": 0.9063987308302486,
+        "kills_per_1000_steps": 19.9396060010545
+      },
+      "frozen": {
+        "reward": 80.08333333333333,
+        "kills": 11.958333333333334,
+        "combat_success": 0.2916666666666667,
+        "survival": 0.3333333333333333,
+        "kill_episode": 0.9583333333333334,
+        "damage_taken": 88.54166666666667,
+        "length": 651.875,
+        "episodes": 24,
+        "death_rate": 0.6666666666666667,
+        "hit_rate": 0.8990963855421686,
+        "kills_per_1000_steps": 18.344519015659955
+      }
+    },
+    "1": {
+      "bilstm": {
+        "reward": 121.54166666666667,
+        "kills": 17.333333333333332,
+        "combat_success": 1.0,
+        "survival": 1.0,
+        "kill_episode": 1.0,
+        "damage_taken": 36.458333333333336,
+        "length": 1000.0,
+        "episodes": 24,
+        "death_rate": 0.0,
+        "hit_rate": 0.8287937743190662,
+        "kills_per_1000_steps": 17.333333333333332
+      },
+      "bilstm_current_only": {
+        "reward": 113.20833333333333,
+        "kills": 16.416666666666668,
+        "combat_success": 0.7916666666666666,
+        "survival": 0.7916666666666666,
+        "kill_episode": 1.0,
+        "damage_taken": 61.458333333333336,
+        "length": 867.875,
+        "episodes": 24,
+        "death_rate": 0.20833333333333337,
+        "hit_rate": 0.8777959629023458,
+        "kills_per_1000_steps": 18.91593451437899
+      },
+      "frozen": {
+        "reward": 79.2375,
+        "kills": 11.958333333333334,
+        "combat_success": 0.16666666666666666,
+        "survival": 0.16666666666666666,
+        "kill_episode": 1.0,
+        "damage_taken": 95.83333333333333,
+        "length": 638.4583333333334,
+        "episodes": 24,
+        "death_rate": 0.8333333333333334,
+        "hit_rate": 0.8843587842846553,
+        "kills_per_1000_steps": 18.730013704888076
+      }
+    },
+    "2": {
+      "bilstm": {
+        "reward": 72.29166666666667,
+        "kills": 10.458333333333334,
+        "combat_success": 0.9583333333333334,
+        "survival": 0.9583333333333334,
+        "kill_episode": 1.0,
+        "damage_taken": 43.75,
+        "length": 991.4166666666666,
+        "episodes": 24,
+        "death_rate": 0.04166666666666663,
+        "hit_rate": 0.7304409672830725,
+        "kills_per_1000_steps": 10.548877868370177
+      },
+      "bilstm_current_only": {
+        "reward": 64.5,
+        "kills": 9.625,
+        "combat_success": 0.75,
+        "survival": 0.75,
+        "kill_episode": 1.0,
+        "damage_taken": 68.75,
+        "length": 938.1666666666666,
+        "episodes": 24,
+        "death_rate": 0.25,
+        "hit_rate": 0.6955555555555556,
+        "kills_per_1000_steps": 10.259371113874579
+      },
+      "frozen": {
+        "reward": 47.09166666666667,
+        "kills": 7.291666666666667,
+        "combat_success": 0.4166666666666667,
+        "survival": 0.4166666666666667,
+        "kill_episode": 1.0,
+        "damage_taken": 86.45833333333333,
+        "length": 741.6666666666666,
+        "episodes": 24,
+        "death_rate": 0.5833333333333333,
+        "hit_rate": 0.6975190839694656,
+        "kills_per_1000_steps": 9.831460674157304
+      }
+    },
+    "3": {
+      "bilstm": {
+        "reward": 51.625,
+        "kills": 7.583333333333333,
+        "combat_success": 0.875,
+        "survival": 0.875,
+        "kill_episode": 1.0,
+        "damage_taken": 48.958333333333336,
+        "length": 987.0416666666666,
+        "episodes": 24,
+        "death_rate": 0.125,
+        "hit_rate": 0.6379897785349233,
+        "kills_per_1000_steps": 7.682890793195154
+      },
+      "bilstm_current_only": {
+        "reward": 42.75,
+        "kills": 6.5,
+        "combat_success": 0.7083333333333334,
+        "survival": 0.7083333333333334,
+        "kill_episode": 1.0,
+        "damage_taken": 64.58333333333333,
+        "length": 927.2083333333334,
+        "episodes": 24,
+        "death_rate": 0.29166666666666663,
+        "hit_rate": 0.5832575068243858,
+        "kills_per_1000_steps": 7.0102907473149685
+      },
+      "frozen": {
+        "reward": 39.949999999999996,
+        "kills": 6.291666666666667,
+        "combat_success": 0.4166666666666667,
+        "survival": 0.4166666666666667,
+        "kill_episode": 1.0,
+        "damage_taken": 83.33333333333333,
+        "length": 827.5,
+        "episodes": 24,
+        "death_rate": 0.5833333333333333,
+        "hit_rate": 0.6063522617901829,
+        "kills_per_1000_steps": 7.603222557905338
+      }
+    },
+    "4": {
+      "bilstm": {
+        "reward": 44.166666666666664,
+        "kills": 6.458333333333333,
+        "combat_success": 1.0,
+        "survival": 1.0,
+        "kill_episode": 1.0,
+        "damage_taken": 40.625,
+        "length": 1000.0,
+        "episodes": 24,
+        "death_rate": 0.0,
+        "hit_rate": 0.5645592163846839,
+        "kills_per_1000_steps": 6.458333333333333
+      },
+      "bilstm_current_only": {
+        "reward": 28.916666666666668,
+        "kills": 4.416666666666667,
+        "combat_success": 0.9166666666666666,
+        "survival": 0.9583333333333334,
+        "kill_episode": 0.9583333333333334,
+        "damage_taken": 53.125,
+        "length": 987.5416666666666,
+        "episodes": 24,
+        "death_rate": 0.04166666666666663,
+        "hit_rate": 0.3550784475639967,
+        "kills_per_1000_steps": 4.4723851314290535
+      },
+      "frozen": {
+        "reward": 22.924999999999997,
+        "kills": 3.9166666666666665,
+        "combat_success": 0.2916666666666667,
+        "survival": 0.2916666666666667,
+        "kill_episode": 1.0,
+        "damage_taken": 91.66666666666667,
+        "length": 760.375,
+        "episodes": 24,
+        "death_rate": 0.7083333333333333,
+        "hit_rate": 0.4212152420185376,
+        "kills_per_1000_steps": 5.150967176283632
+      }
+    }
+  },
+  "per_training_seed": {
+    "stage0/bilstm/seed0": {
+      "reward": 117.54166666666667,
+      "kills": 16.916666666666668,
+      "combat_success": 0.8333333333333334,
+      "survival": 0.8333333333333334,
+      "kill_episode": 1.0,
+      "damage_taken": 46.875,
+      "length": 957.3333333333334
+    },
+    "stage0/bilstm_current_only/seed0": {
+      "reward": 120.29166666666667,
+      "kills": 17.333333333333332,
+      "combat_success": 0.6666666666666666,
+      "survival": 0.6666666666666666,
+      "kill_episode": 1.0,
+      "damage_taken": 53.125,
+      "length": 869.2916666666666
+    },
+    "stage0/frozen/seed-1": {
+      "reward": 80.08333333333333,
+      "kills": 11.958333333333334,
+      "combat_success": 0.2916666666666667,
+      "survival": 0.3333333333333333,
+      "kill_episode": 0.9583333333333334,
+      "damage_taken": 88.54166666666667,
+      "length": 651.875
+    },
+    "stage1/bilstm/seed0": {
+      "reward": 121.54166666666667,
+      "kills": 17.333333333333332,
+      "combat_success": 1.0,
+      "survival": 1.0,
+      "kill_episode": 1.0,
+      "damage_taken": 36.458333333333336,
+      "length": 1000.0
+    },
+    "stage1/bilstm_current_only/seed0": {
+      "reward": 113.20833333333333,
+      "kills": 16.416666666666668,
+      "combat_success": 0.7916666666666666,
+      "survival": 0.7916666666666666,
+      "kill_episode": 1.0,
+      "damage_taken": 61.458333333333336,
+      "length": 867.875
+    },
+    "stage1/frozen/seed-1": {
+      "reward": 79.2375,
+      "kills": 11.958333333333334,
+      "combat_success": 0.16666666666666666,
+      "survival": 0.16666666666666666,
+      "kill_episode": 1.0,
+      "damage_taken": 95.83333333333333,
+      "length": 638.4583333333334
+    },
+    "stage2/bilstm/seed0": {
+      "reward": 72.29166666666667,
+      "kills": 10.458333333333334,
+      "combat_success": 0.9583333333333334,
+      "survival": 0.9583333333333334,
+      "kill_episode": 1.0,
+      "damage_taken": 43.75,
+      "length": 991.4166666666666
+    },
+    "stage2/bilstm_current_only/seed0": {
+      "reward": 64.5,
+      "kills": 9.625,
+      "combat_success": 0.75,
+      "survival": 0.75,
+      "kill_episode": 1.0,
+      "damage_taken": 68.75,
+      "length": 938.1666666666666
+    },
+    "stage2/frozen/seed-1": {
+      "reward": 47.09166666666667,
+      "kills": 7.291666666666667,
+      "combat_success": 0.4166666666666667,
+      "survival": 0.4166666666666667,
+      "kill_episode": 1.0,
+      "damage_taken": 86.45833333333333,
+      "length": 741.6666666666666
+    },
+    "stage3/bilstm/seed0": {
+      "reward": 51.625,
+      "kills": 7.583333333333333,
+      "combat_success": 0.875,
+      "survival": 0.875,
+      "kill_episode": 1.0,
+      "damage_taken": 48.958333333333336,
+      "length": 987.0416666666666
+    },
+    "stage3/bilstm_current_only/seed0": {
+      "reward": 42.75,
+      "kills": 6.5,
+      "combat_success": 0.7083333333333334,
+      "survival": 0.7083333333333334,
+      "kill_episode": 1.0,
+      "damage_taken": 64.58333333333333,
+      "length": 927.2083333333334
+    },
+    "stage3/frozen/seed-1": {
+      "reward": 39.949999999999996,
+      "kills": 6.291666666666667,
+      "combat_success": 0.4166666666666667,
+      "survival": 0.4166666666666667,
+      "kill_episode": 1.0,
+      "damage_taken": 83.33333333333333,
+      "length": 827.5
+    },
+    "stage4/bilstm/seed0": {
+      "reward": 44.166666666666664,
+      "kills": 6.458333333333333,
+      "combat_success": 1.0,
+      "survival": 1.0,
+      "kill_episode": 1.0,
+      "damage_taken": 40.625,
+      "length": 1000.0
+    },
+    "stage4/bilstm_current_only/seed0": {
+      "reward": 28.916666666666668,
+      "kills": 4.416666666666667,
+      "combat_success": 0.9166666666666666,
+      "survival": 0.9583333333333334,
+      "kill_episode": 0.9583333333333334,
+      "damage_taken": 53.125,
+      "length": 987.5416666666666
+    },
+    "stage4/frozen/seed-1": {
+      "reward": 22.924999999999997,
+      "kills": 3.9166666666666665,
+      "combat_success": 0.2916666666666667,
+      "survival": 0.2916666666666667,
+      "kill_episode": 1.0,
+      "damage_taken": 91.66666666666667,
+      "length": 760.375
+    }
+  },
+  "paired_differences_with_bootstrap_ci95": {
+    "0": {
+      "bilstm_minus_frozen": {
+        "reward": {
+          "mean_delta": 37.458333333333336,
+          "ci95_low": 16.454166666666666,
+          "ci95_high": 58.00104166666667
+        },
+        "kills": {
+          "mean_delta": 4.958333333333333,
+          "ci95_low": 2.0416666666666665,
+          "ci95_high": 7.833333333333333
+        },
+        "combat_success": {
+          "mean_delta": 0.5416666666666666,
+          "ci95_low": 0.25,
+          "ci95_high": 0.7916666666666666
+        },
+        "survival": {
+          "mean_delta": 0.5,
+          "ci95_low": 0.20833333333333334,
+          "ci95_high": 0.75
+        },
+        "kill_episode": {
+          "mean_delta": 0.041666666666666664,
+          "ci95_low": 0.0,
+          "ci95_high": 0.125
+        },
+        "damage_taken": {
+          "mean_delta": -41.666666666666664,
+          "ci95_low": -57.291666666666664,
+          "ci95_high": -23.958333333333332
+        },
+        "length": {
+          "mean_delta": 305.4583333333333,
+          "ci95_low": 160.95729166666666,
+          "ci95_high": 447.75104166666665
+        }
+      },
+      "bilstm_minus_bilstm_current_only": {
+        "reward": {
+          "mean_delta": -2.75,
+          "ci95_low": -18.291666666666668,
+          "ci95_high": 14.541666666666666
+        },
+        "kills": {
+          "mean_delta": -0.4166666666666667,
+          "ci95_low": -2.5,
+          "ci95_high": 1.9166666666666667
+        },
+        "combat_success": {
+          "mean_delta": 0.16666666666666666,
+          "ci95_low": -0.041666666666666664,
+          "ci95_high": 0.375
+        },
+        "survival": {
+          "mean_delta": 0.16666666666666666,
+          "ci95_low": -0.041666666666666664,
+          "ci95_high": 0.375
+        },
+        "kill_episode": {
+          "mean_delta": 0.0,
+          "ci95_low": 0.0,
+          "ci95_high": 0.0
+        },
+        "damage_taken": {
+          "mean_delta": -6.25,
+          "ci95_low": -26.041666666666668,
+          "ci95_high": 14.583333333333334
+        },
+        "length": {
+          "mean_delta": 88.04166666666667,
+          "ci95_low": -3.2624999999999957,
+          "ci95_high": 196.41979166666667
+        }
+      }
+    },
+    "1": {
+      "bilstm_minus_frozen": {
+        "reward": {
+          "mean_delta": 42.30416666666667,
+          "ci95_low": 23.59572916666667,
+          "ci95_high": 60.34697916666668
+        },
+        "kills": {
+          "mean_delta": 5.375,
+          "ci95_low": 2.75,
+          "ci95_high": 7.875
+        },
+        "combat_success": {
+          "mean_delta": 0.8333333333333334,
+          "ci95_low": 0.6666666666666666,
+          "ci95_high": 0.9583333333333334
+        },
+        "survival": {
+          "mean_delta": 0.8333333333333334,
+          "ci95_low": 0.6666666666666666,
+          "ci95_high": 0.9583333333333334
+        },
+        "kill_episode": {
+          "mean_delta": 0.0,
+          "ci95_low": 0.0,
+          "ci95_high": 0.0
+        },
+        "damage_taken": {
+          "mean_delta": -59.375,
+          "ci95_low": -68.75,
+          "ci95_high": -50.0
+        },
+        "length": {
+          "mean_delta": 361.5416666666667,
+          "ci95_low": 251.7375,
+          "ci95_high": 469.05729166666674
+        }
+      },
+      "bilstm_minus_bilstm_current_only": {
+        "reward": {
+          "mean_delta": 8.333333333333334,
+          "ci95_low": -8.334375,
+          "ci95_high": 26.252083333333342
+        },
+        "kills": {
+          "mean_delta": 0.9166666666666666,
+          "ci95_low": -1.3760416666666664,
+          "ci95_high": 3.4166666666666665
+        },
+        "combat_success": {
+          "mean_delta": 0.20833333333333334,
+          "ci95_low": 0.041666666666666664,
+          "ci95_high": 0.375
+        },
+        "survival": {
+          "mean_delta": 0.20833333333333334,
+          "ci95_low": 0.041666666666666664,
+          "ci95_high": 0.375
+        },
+        "kill_episode": {
+          "mean_delta": 0.0,
+          "ci95_low": 0.0,
+          "ci95_high": 0.0
+        },
+        "damage_taken": {
+          "mean_delta": -25.0,
+          "ci95_low": -37.5,
+          "ci95_high": -11.458333333333334
+        },
+        "length": {
+          "mean_delta": 132.125,
+          "ci95_low": 32.708333333333336,
+          "ci95_high": 251.29166666666666
+        }
+      }
+    },
+    "2": {
+      "bilstm_minus_frozen": {
+        "reward": {
+          "mean_delta": 25.200000000000003,
+          "ci95_low": 12.03625,
+          "ci95_high": 37.90114583333334
+        },
+        "kills": {
+          "mean_delta": 3.1666666666666665,
+          "ci95_low": 1.375,
+          "ci95_high": 4.875
+        },
+        "combat_success": {
+          "mean_delta": 0.5416666666666666,
+          "ci95_low": 0.2916666666666667,
+          "ci95_high": 0.75
+        },
+        "survival": {
+          "mean_delta": 0.5416666666666666,
+          "ci95_low": 0.2916666666666667,
+          "ci95_high": 0.75
+        },
+        "kill_episode": {
+          "mean_delta": 0.0,
+          "ci95_low": 0.0,
+          "ci95_high": 0.0
+        },
+        "damage_taken": {
+          "mean_delta": -42.708333333333336,
+          "ci95_low": -57.291666666666664,
+          "ci95_high": -28.09895833333324
+        },
+        "length": {
+          "mean_delta": 249.75,
+          "ci95_low": 141.45000000000002,
+          "ci95_high": 365.3031250000001
+        }
+      },
+      "bilstm_minus_bilstm_current_only": {
+        "reward": {
+          "mean_delta": 7.791666666666667,
+          "ci95_low": -2.5,
+          "ci95_high": 17.333333333333332
+        },
+        "kills": {
+          "mean_delta": 0.8333333333333334,
+          "ci95_low": -0.5416666666666666,
+          "ci95_high": 2.125
+        },
+        "combat_success": {
+          "mean_delta": 0.20833333333333334,
+          "ci95_low": 0.0,
+          "ci95_high": 0.4166666666666667
+        },
+        "survival": {
+          "mean_delta": 0.20833333333333334,
+          "ci95_low": 0.0,
+          "ci95_high": 0.4166666666666667
+        },
+        "kill_episode": {
+          "mean_delta": 0.0,
+          "ci95_low": 0.0,
+          "ci95_high": 0.0
+        },
+        "damage_taken": {
+          "mean_delta": -25.0,
+          "ci95_low": -36.458333333333336,
+          "ci95_high": -13.541666666666666
+        },
+        "length": {
+          "mean_delta": 53.25,
+          "ci95_low": 1.25,
+          "ci95_high": 114.71562500000002
+        }
+      }
+    },
+    "3": {
+      "bilstm_minus_frozen": {
+        "reward": {
+          "mean_delta": 11.674999999999999,
+          "ci95_low": 3.195520833333333,
+          "ci95_high": 20.379687500000003
+        },
+        "kills": {
+          "mean_delta": 1.2916666666666667,
+          "ci95_low": 0.08333333333333333,
+          "ci95_high": 2.5416666666666665
+        },
+        "combat_success": {
+          "mean_delta": 0.4583333333333333,
+          "ci95_low": 0.20833333333333334,
+          "ci95_high": 0.6666666666666666
+        },
+        "survival": {
+          "mean_delta": 0.4583333333333333,
+          "ci95_low": 0.20833333333333334,
+          "ci95_high": 0.6666666666666666
+        },
+        "kill_episode": {
+          "mean_delta": 0.0,
+          "ci95_low": 0.0,
+          "ci95_high": 0.0
+        },
+        "damage_taken": {
+          "mean_delta": -34.375,
+          "ci95_low": -45.833333333333336,
+          "ci95_high": -21.875
+        },
+        "length": {
+          "mean_delta": 159.54166666666666,
+          "ci95_low": 80.121875,
+          "ci95_high": 243.08437500000002
+        }
+      },
+      "bilstm_minus_bilstm_current_only": {
+        "reward": {
+          "mean_delta": 8.875,
+          "ci95_low": 2.25,
+          "ci95_high": 15.916666666666666
+        },
+        "kills": {
+          "mean_delta": 1.0833333333333333,
+          "ci95_low": 0.16666666666666666,
+          "ci95_high": 2.0416666666666665
+        },
+        "combat_success": {
+          "mean_delta": 0.16666666666666666,
+          "ci95_low": -0.08333333333333333,
+          "ci95_high": 0.375
+        },
+        "survival": {
+          "mean_delta": 0.16666666666666666,
+          "ci95_low": -0.08333333333333333,
+          "ci95_high": 0.375
+        },
+        "kill_episode": {
+          "mean_delta": 0.0,
+          "ci95_low": 0.0,
+          "ci95_high": 0.0
+        },
+        "damage_taken": {
+          "mean_delta": -15.625,
+          "ci95_low": -31.25,
+          "ci95_high": 0.0
+        },
+        "length": {
+          "mean_delta": 59.833333333333336,
+          "ci95_low": 11.541666666666666,
+          "ci95_high": 115.71041666666667
+        }
+      }
+    },
+    "4": {
+      "bilstm_minus_frozen": {
+        "reward": {
+          "mean_delta": 21.24166666666667,
+          "ci95_low": 15.152083333333335,
+          "ci95_high": 27.57989583333334
+        },
+        "kills": {
+          "mean_delta": 2.5416666666666665,
+          "ci95_low": 1.7083333333333333,
+          "ci95_high": 3.375
+        },
+        "combat_success": {
+          "mean_delta": 0.7083333333333334,
+          "ci95_low": 0.5,
+          "ci95_high": 0.875
+        },
+        "survival": {
+          "mean_delta": 0.7083333333333334,
+          "ci95_low": 0.5,
+          "ci95_high": 0.875
+        },
+        "kill_episode": {
+          "mean_delta": 0.0,
+          "ci95_low": 0.0,
+          "ci95_high": 0.0
+        },
+        "damage_taken": {
+          "mean_delta": -51.041666666666664,
+          "ci95_low": -64.58333333333333,
+          "ci95_high": -37.5
+        },
+        "length": {
+          "mean_delta": 239.625,
+          "ci95_low": 150.83020833333333,
+          "ci95_high": 334.05000000000007
+        }
+      },
+      "bilstm_minus_bilstm_current_only": {
+        "reward": {
+          "mean_delta": 15.25,
+          "ci95_low": 10.083333333333334,
+          "ci95_high": 21.00104166666667
+        },
+        "kills": {
+          "mean_delta": 2.0416666666666665,
+          "ci95_low": 1.2916666666666667,
+          "ci95_high": 2.8333333333333335
+        },
+        "combat_success": {
+          "mean_delta": 0.08333333333333333,
+          "ci95_low": 0.0,
+          "ci95_high": 0.20833333333333334
+        },
+        "survival": {
+          "mean_delta": 0.041666666666666664,
+          "ci95_low": 0.0,
+          "ci95_high": 0.125
+        },
+        "kill_episode": {
+          "mean_delta": 0.041666666666666664,
+          "ci95_low": 0.0,
+          "ci95_high": 0.125
+        },
+        "damage_taken": {
+          "mean_delta": -12.5,
+          "ci95_low": -21.875,
+          "ci95_high": -3.125
+        },
+        "length": {
+          "mean_delta": 12.458333333333334,
+          "ci95_low": 0.0,
+          "ci95_high": 37.375
+        }
+      }
+    }
+  },
+  "verdict": "Success exceeds the reference on these trials. The history-ablation success difference is uncertain.",
+  "reference_verdict": "Success exceeds the reference on these trials.",
+  "memory_verdict": "The history-ablation success difference is uncertain.",
+  "limitations": [
+    "Few training seeds; these bootstrap intervals reflect sampled trials, not general architecture superiority.",
+    "Current-only history is an input-distribution ablation, not a separate trained agent.",
+    "Same initial map/spawn seeds do not ensure identical subsequent trajectories.",
+    "Success is a reporting definition; the environment has no built-in win condition.",
+    "Evaluation maps are excluded from the new training run; the historical reference map selection may be unknown."
+  ]
+}

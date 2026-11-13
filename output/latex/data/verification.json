@@ -1,0 +1,69 @@
+{
+  "evaluation_rows": 360,
+  "raw_metrics_and_all_bootstrap_intervals_verified": true,
+  "checkpoints": {
+    "bilstm_gpu_all_stages_20261112.pt": {
+      "sha256": "5271a7c39e28ee8903974bd8dd5b18c99a71efe4ee1e56dfc0a03b6a6ba47c14",
+      "parameters": 163183,
+      "global_step": 2769992,
+      "episodes": 3748,
+      "updates": 1353,
+      "stage_history": [
+        {
+          "completed_stage": 0,
+          "global_step": 246248,
+          "episodes": 600,
+          "updates": 120
+        },
+        {
+          "completed_stage": 1,
+          "global_step": 332096,
+          "episodes": 738,
+          "updates": 162
+        },
+        {
+          "completed_stage": 2,
+          "global_step": 991816,
+          "episodes": 1676,
+          "updates": 484
+        },
+        {
+          "completed_stage": 3,
+          "global_step": 1529808,
+          "episodes": 2339,
+          "updates": 746
+        }
+      ],
+      "curriculum_complete": true
+    },
+    "bilstm_gpu_all_stages_20261112_feedforward_control.pt": {
+      "sha256": "8715f8e53c031521dd018fc858f1eefa7db02c2d6895e6ebe5b56584f9ef561d",
+      "parameters": 97807,
+      "global_step": 2769992,
+      "episodes": 3977,
+      "updates": 1353,
+      "stage_history": [
+        {
+          "completed_stage": 0,
+          "global_step": 165568,
+          "episodes": 604,
+          "updates": 80
+        },
+        {
+          "completed_stage": 1,
+          "global_step": 239200,
+          "episodes": 738,
+          "updates": 116
+        },
+        {
+          "completed_stage": 2,
+          "global_step": 886128,
+          "episodes": 1626,
+          "updates": 432
+        }
+      ],
+      "curriculum_complete": false
+    }
+  },
+  "archived_source_matches_working_tree": true
+}

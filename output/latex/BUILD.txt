@@ -1,0 +1,85 @@
+IEEE-style LaTeX report
+
+Main source: Reinforcement_2D_Shooter_IEEE_Report.tex
+Bibliography: references.bib
+Figures: figures/
+Frozen experimental evidence: data/
+
+Build from this directory:
+  tectonic Reinforcement_2D_Shooter_IEEE_Report.tex
+or
+  latexmk -pdf Reinforcement_2D_Shooter_IEEE_Report.tex
+
+Overleaf:
+Upload the complete source ZIP and select
+Reinforcement_2D_Shooter_IEEE_Report.tex as the main document.
+Use pdfLaTeX with BibTeX (the ordinary Overleaf default).
+All figures and the bibliography are included. Python and checkpoints are not
+needed to compile. IEEEtran.cls and IEEEtran.bst are standard TeX Live files.
+
+Author information:
+First author: Minh Quan Dinh
+Second author: Quoc Anh Phan
+Names use the requested English order without diacritics.
+No institution, instructor, or course code was provided.
+
+Evidence:
+The main study is reports/bilstm_gpu_all_stages_20261112/ in the repository.
+Both scratch policies use 2,769,992 environment transitions and training seed 0.
+The matched feedforward control is the 'frozen' variant in the copied CSV/JSON.
+It is distinct from the separate historical checkpoint benchmark.
+Results are from saved experiments, not newly performed training.
+
+The companion data includes 360 raw evaluation episodes, comparison summaries,
+configuration and provenance manifests, training CSVs, and report validation.
+verification.json records independent recalculation of all matched stage
+metrics and bootstrap intervals, checkpoint SHA-256 hashes, parameter counts,
+and matching archived application source.
+
+Regenerate figures and evidence from the full repository (optional):
+  python output/latex/scripts/generate_assets.py
+This requires NumPy, PyTorch, Gymnasium, Pygame, Matplotlib, saved reports,
+and the two original primary-study checkpoints. It reads checkpoints only.
+
+Verification limitations:
+The recorded software test run had 92 passes, one self-play report-selection
+assertion failure, one dashboard import error (Streamlit absent), and one CUDA
+skip. See data/test_summary.tex and the paper's software-verification section.
+
+Reproduce the adaptive matched experiment (from the repository root):
+  python training_bilstm_scratch.py --model paper_bilstm_seed0 --device cuda \
+    --run-dir reports/paper_bilstm_seed0 --min-steps 2501688 \
+    --train-control --no-dashboard
+
+A fresh run can stop at a different budget under this mastery-based protocol.
+For a fixed-budget comparison, train both architectures independently:
+  python training_bilstm_scratch.py --architecture feedforward \
+    --model paper_ff_seed0 --device cuda --seed 0 --steps 2769992 \
+    --no-until-curriculum-complete --no-dashboard --skip-evaluation \
+    --run-dir reports/paper_ff_seed0
+  python training_bilstm_scratch.py --architecture bilstm \
+    --model paper_bi_seed0 --device cuda --seed 0 --steps 2769992 \
+    --no-until-curriculum-complete --no-dashboard --skip-evaluation \
+    --run-dir reports/paper_bi_seed0
+Repeat with additional independent training seeds before generalizing.
+
+Evaluate the supplied primary candidate and matched control:
+  python training_bilstm_scratch.py --evaluate-only --device cpu \
+    --model bilstm_gpu_all_stages_20261112 \
+    --compare-to checkpoints/bilstm_gpu_all_stages_20261112_feedforward_control.pt \
+    --run-dir reports/paper_matched_reevaluation --no-dashboard
+The default maps 14-17, spawn seeds 20000-20005, and stages 0-4 match the paper.
+Use --model paper_bi_seed0 and --compare-to checkpoints/paper_ff_seed0.pt
+with a fresh run directory to compare the fixed-budget replications instead.
+
+Paper revision:
+Removed the date/subtitle under the author line. Added related work and a formal
+problem statement, checked core project coverage, and clarified study limits.
+Training curves share a dedicated legend above both panels; curriculum stage
+transitions now use exact checkpoint promotion events. Solid/dashed lines
+support reading in monochrome. No training measurements were altered.
+
+Source and data snapshot: 12 November 2026.
+Repository commit: b6cb20074782e5a7efc7afc621f6477283bfe8be.
+The primary experiment archived all 19 application Python files; their hashes
+match the inspected current application files.

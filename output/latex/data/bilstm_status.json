@@ -1,0 +1,32 @@
+{
+  "status": "trained",
+  "reason": "curriculum complete",
+  "global_step": 2769992,
+  "episodes": 3748,
+  "updates": 1353,
+  "architecture": "bilstm",
+  "initialization": "random",
+  "pretrained_steps": 0,
+  "device": "cuda",
+  "gpu": "NVIDIA GeForce GTX 1650",
+  "stage": 4,
+  "completed_stages": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "curriculum_complete": true,
+  "stage_window_episodes": 100,
+  "stage_window_target": 100,
+  "stage_mean_reward": 35.611,
+  "promotion_reward": 35.0,
+  "min_steps": 2501688,
+  "total_steps": null,
+  "steps_per_second": 726.4302234397508,
+  "checkpoint": "/home/whopqa/Documents/FPT/REL/Reinforcement-2D-Shooter-Agent/checkpoints/bilstm_gpu_all_stages_20261112.pt",
+  "updated_at": "2026-11-12T04:42:45",
+  "gpu_allocated_mb": 2.66259765625,
+  "gpu_peak_allocated_mb": 156.74072265625
+}

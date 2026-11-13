@@ -1,0 +1,29 @@
+{
+  "source_root": "/home/whopqa/Documents/FPT/REL/Reinforcement-2D-Shooter-Agent",
+  "snapshot": "/home/whopqa/Documents/FPT/REL/Reinforcement-2D-Shooter-Agent/reports/bilstm_gpu_all_stages_20261112/source",
+  "files_sha256": {
+    "dashboard_app.py": "c393f5b7e6bec131783424f2dd46126a50d3f4bb0483b990162c3fed5b17df6a",
+    "map_generation.py": "679e6e599ccc1e4806547efdedf414b2e4252d95605d03e2f15d59b64da1cee1",
+    "render_preview.py": "c25bd23241c0cf1ab75c829ef7b4b46adc90b028297977476f2ba6c0bba31720",
+    "training_random_map.py": "a1463479abae8aaffa28837f8702484c1fd7982dfbbffe882029a7709043ad3a",
+    "visibility.py": "ac21da38d7b5eef121237798889d6b8259813d0a0e17f97f3453849b19a609ca",
+    "training_bilstm_scratch.py": "dd172bf26326ce5cb1d4f50f57218df567cfc9cbc97479ba0fbc54bc3692170b",
+    "entities.py": "d182198c292638a92e7eea9665e97c5f414f195013bbaea880520f7f25d3c8ef",
+    "environments.py": "13f179a5afcc1ae8d3534c5861eb048798c3e25f4c973b7c26ff799335df8e45",
+    "renderer.py": "84d59610db1475cf9e2f9b92a698cd9fa848f5c20a68873055498c561dd3d141",
+    "self_play.py": "ab504935122d1df7423372143393d4b9625da1c711706af96eb216f33dd89f63",
+    "dashboard.py": "434c9375ca8cb9aab68f70d1930f650631b3a2c9ef0b458575aa89d7dd6eadc7",
+    "training_report.py": "cc990eafa814a8ca29290233ecf475de9ee3508ffd947c2b92563d81af5435b7",
+    "models/mlp.py": "cfc76b6347c30e25f60c30ddf8eab6b8371d89e5c1f07eb7c2b70b5650629125",
+    "models/runtime.py": "ead1340b182d37232125cfa8acb3c9beb4a9d1a66f3e9f18cc73dc62311fd5ac",
+    "models/curriculum_ppo.py": "892ac6a96355993c9bfac3583699bc97c6a1cbf0df1a273d217397e20d91ae73",
+    "models/__init__.py": "dc72483bb45909bd6536afb4187b4c4df154ab361f2900ca3ff91dd6a6128896",
+    "models/ppo.py": "5ad14a41ccb52df5e8c067826932ff832da1be19e39696f556537e66ad35967a",
+    "models/recurrent.py": "4541b74454c14929e1d9fec209fab7b20a28929b647309061e30cc78b56afc53",
+    "models/evaluation.py": "17183dbc079730278967385e29519b0e6ee96f035913b2cdab62686726bb9ed4"
+  },
+  "python": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+  "torch": "2.15.0+cu132",
+  "compiled_cuda": "13.2",
+  "purpose": "Freeze identical code for the recurrent candidate and matched feedforward control."
+}
