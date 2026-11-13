@@ -23,5 +23,11 @@
     "Quoc Anh Phan"
   ],
   "author_revision": "Author names use the requested English order without diacritics. PDF text extraction and rendered cover verified.",
-  "author_order_and_spelling_verified": true
+  "author_order_and_spelling_verified": true,
+  "title_date_removed": true,
+  "training_figure_legend_overlap_checked": true,
+  "exact_curriculum_promotion_events_used": true,
+  "academic_content_review": "data/content_review.json",
+  "new_training_or_evaluation_performed": false,
+  "latest_revision": "Removed author-block date and subtitle; repaired training figure; expanded related work and project coverage; clarified study design, initialization, notation, and uncertainty; moved detailed commands to BUILD.txt."
 }
